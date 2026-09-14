@@ -1,0 +1,27 @@
+# Build artifacts
+*.o
+*.bin
+*.dSYM/
+build/
+
+# Test binaries
+tests/test_retrieval
+tests/test_retrieval_asm
+tests/test_edge_cases
+tests/test_edge_cases_asan
+tests/test_retrieval_asan
+tests/test_retrieval_asm_asan
+tests/dump_case
+tests/fuzz_retrieval_asm
+tests/fuzz_debug
+
+# Benchmark binaries
+benchmark/bench_retrieval
+benchmark/bench_compare
+
+# macOS
+.DS_Store
+
+# Editors
+.vscode/
+.idea/
