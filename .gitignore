@@ -12,8 +12,9 @@ tests/test_edge_cases_asan
 tests/test_retrieval_asan
 tests/test_retrieval_asm_asan
 tests/dump_case
-tests/fuzz_retrieval_asm
+tests/fuzz_gen
 tests/fuzz_debug
+tests/fuzz_retrieval_asm
 
 # Benchmark binaries
 benchmark/bench_retrieval
