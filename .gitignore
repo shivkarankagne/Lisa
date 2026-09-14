@@ -26,3 +26,11 @@ benchmark/bench_compare
 # Editors
 .vscode/
 .idea/
+
+# Test data (generated locally)
+vectors_768.bin
+vectors.bin
+query_768.txt
+query.txt
+query_64.txt
+query_64_space.txt
