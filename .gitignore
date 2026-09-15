@@ -41,3 +41,7 @@ tests/test_storage_asan
 
 # CLI test helper
 tests/build_collection
+
+# Storage mutation test binaries
+tests/test_storage_mutation
+tests/test_storage_mutation_asan

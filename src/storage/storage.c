@@ -10,12 +10,16 @@
 #include <errno.h>
 
 #define LISA_STORAGE_MAX_HANDLES 64
+#define LISA_STORAGE_HEADER_V1 16
+#define LISA_STORAGE_HEADER_V2 20
 
 typedef struct {
     int in_use;
     char* path;
     int n;
     int dim;
+    int capacity;
+    int version;
     float* vectors;
 } storage_slot_t;
 
@@ -23,7 +27,7 @@ static storage_slot_t g_slots[LISA_STORAGE_MAX_HANDLES];
 
 static const char LISA_MAGIC[4] = { 'L', 'I', 'S', 'A' };
 
-/* ---- helpers ---- */
+/* ---- little-endian helpers ---- */
 
 static int write_u32_le(FILE* f, uint32_t v) {
     unsigned char buf[4];
@@ -44,6 +48,8 @@ static int read_u32_le(FILE* f, uint32_t* out) {
     return 0;
 }
 
+/* ---- filesystem helpers ---- */
+
 static int dir_exists(const char* path) {
     struct stat st;
     if (stat(path, &st) != 0) return 0;
@@ -63,6 +69,8 @@ static char* path_join(const char* dir, const char* name) {
     return p;
 }
 
+/* ---- handle helpers ---- */
+
 static int handle_valid(int handle) {
     return handle > 0 && handle < LISA_STORAGE_MAX_HANDLES
         && g_slots[handle].in_use;
@@ -75,56 +83,72 @@ static int handle_alloc(void) {
     return -6;
 }
 
+/* ---- header I/O ---- */
+
+static int write_header_v2(const char* path, int n, int dim, int capacity) {
+    char* hp = path_join(path, "header.bin");
+    if (!hp) return -5;
+    FILE* f = fopen(hp, "wb");
+    free(hp);
+    if (!f) return -2;
+
+    int rc = 0;
+    if (fwrite(LISA_MAGIC, 1, 4, f) != 4) rc = -2;
+    if (rc == 0 && write_u32_le(f, LISA_STORAGE_FORMAT_VERSION) != 0) rc = -2;
+    if (rc == 0 && write_u32_le(f, (uint32_t)n) != 0) rc = -2;
+    if (rc == 0 && write_u32_le(f, (uint32_t)dim) != 0) rc = -2;
+    if (rc == 0 && write_u32_le(f, (uint32_t)capacity) != 0) rc = -2;
+    if (fclose(f) != 0 && rc == 0) rc = -2;
+    return rc;
+}
+
+static int write_vectors(const char* path, const float* vectors,
+                         int n_live, int dim, int capacity) {
+    char* vp = path_join(path, "vectors.bin");
+    if (!vp) return -5;
+    FILE* f = fopen(vp, "wb");
+    free(vp);
+    if (!f) return -2;
+
+    size_t total = (size_t)capacity * (size_t)dim;
+    size_t live  = (size_t)n_live   * (size_t)dim;
+
+    int rc = 0;
+    if (live > 0) {
+        if (fwrite(vectors, sizeof(float), live, f) != live) rc = -2;
+    }
+    if (rc == 0 && total > live) {
+        /* zero the unused tail so the file is deterministic */
+        size_t tail = total - live;
+        float* zeros = (float*)calloc(tail, sizeof(float));
+        if (!zeros) {
+            rc = -5;
+        } else {
+            if (fwrite(zeros, sizeof(float), tail, f) != tail) rc = -2;
+            free(zeros);
+        }
+    }
+    if (fclose(f) != 0 && rc == 0) rc = -2;
+    return rc;
+}
+
 /* ---- public API ---- */
 
 int storage_create(const char* path, int n, int dim, const float* vectors) {
     if (!path || !vectors) return -1;
     if (n <= 0 || dim <= 0) return -1;
     if (strlen(path) == 0) return -1;
-
     if (dir_exists(path)) return -2;
+
     if (mkdir(path, 0755) != 0) return -2;
 
-    char* header_path = path_join(path, "header.bin");
-    char* vectors_path = path_join(path, "vectors.bin");
-    if (!header_path || !vectors_path) {
-        free(header_path); free(vectors_path);
-        return -5;
-    }
+    int capacity = n;
+    int rc = write_header_v2(path, n, dim, capacity);
+    if (rc != 0) return rc;
 
-    FILE* hf = fopen(header_path, "wb");
-    if (!hf) {
-        free(header_path); free(vectors_path);
-        return -2;
-    }
-    int rc = 0;
-    if (fwrite(LISA_MAGIC, 1, 4, hf) != 4) rc = -2;
-    if (rc == 0 && write_u32_le(hf, LISA_STORAGE_FORMAT_VERSION) != 0) rc = -2;
-    if (rc == 0 && write_u32_le(hf, (uint32_t)n) != 0) rc = -2;
-    if (rc == 0 && write_u32_le(hf, (uint32_t)dim) != 0) rc = -2;
-    if (fclose(hf) != 0 && rc == 0) rc = -2;
-    if (rc != 0) {
-        free(header_path); free(vectors_path);
-        return rc;
-    }
+    rc = write_vectors(path, vectors, n, dim, capacity);
+    if (rc != 0) return rc;
 
-    FILE* vf = fopen(vectors_path, "wb");
-    if (!vf) {
-        free(header_path); free(vectors_path);
-        return -2;
-    }
-    size_t count = (size_t)n * (size_t)dim;
-    if (fwrite(vectors, sizeof(float), count, vf) != count) {
-        fclose(vf);
-        free(header_path); free(vectors_path);
-        return -2;
-    }
-    if (fclose(vf) != 0) {
-        free(header_path); free(vectors_path);
-        return -2;
-    }
-
-    free(header_path); free(vectors_path);
     return 0;
 }
 
@@ -132,92 +156,102 @@ int storage_open(const char* path) {
     if (!path) return -1;
     if (!dir_exists(path)) return -2;
 
-    char* header_path = path_join(path, "header.bin");
-    char* vectors_path = path_join(path, "vectors.bin");
-    if (!header_path || !vectors_path) {
-        free(header_path); free(vectors_path);
+    char* hp = path_join(path, "header.bin");
+    char* vp = path_join(path, "vectors.bin");
+    if (!hp || !vp) {
+        free(hp); free(vp);
         return -5;
     }
 
-    FILE* hf = fopen(header_path, "rb");
-    if (!hf) {
-        free(header_path); free(vectors_path);
-        return -2;
-    }
+    FILE* hf = fopen(hp, "rb");
+    if (!hf) { free(hp); free(vp); return -2; }
 
     char magic[4];
     if (fread(magic, 1, 4, hf) != 4) {
-        fclose(hf); free(header_path); free(vectors_path);
+        fclose(hf); free(hp); free(vp);
         return -3;
     }
     if (memcmp(magic, LISA_MAGIC, 4) != 0) {
-        fclose(hf); free(header_path); free(vectors_path);
+        fclose(hf); free(hp); free(vp);
         return -3;
     }
 
-    uint32_t version = 0, n_u = 0, dim_u = 0;
+    uint32_t version = 0, n_u = 0, dim_u = 0, cap_u = 0;
     if (read_u32_le(hf, &version) != 0 ||
         read_u32_le(hf, &n_u) != 0 ||
         read_u32_le(hf, &dim_u) != 0) {
-        fclose(hf); free(header_path); free(vectors_path);
+        fclose(hf); free(hp); free(vp);
+        return -3;
+    }
+
+    if (version == 1u) {
+        cap_u = n_u;
+    } else if (version == 2u) {
+        if (read_u32_le(hf, &cap_u) != 0) {
+            fclose(hf); free(hp); free(vp);
+            return -3;
+        }
+    } else {
+        fclose(hf); free(hp); free(vp);
         return -3;
     }
     fclose(hf);
 
-    if (version != LISA_STORAGE_FORMAT_VERSION) {
-        free(header_path); free(vectors_path);
-        return -3;
-    }
-
     int n = (int)n_u;
     int dim = (int)dim_u;
-    if (n <= 0 || dim <= 0) {
-        free(header_path); free(vectors_path);
+    int capacity = (int)cap_u;
+
+    if (n < 0 || dim <= 0 || capacity < n) {
+        free(hp); free(vp);
         return -3;
     }
 
-    size_t count = (size_t)n * (size_t)dim;
-    float* vectors = (float*)malloc(count * sizeof(float));
-    if (!vectors) {
-        free(header_path); free(vectors_path);
-        return -5;
+    size_t count = (size_t)capacity * (size_t)dim;
+    float* vectors = NULL;
+    if (count > 0) {
+        vectors = (float*)malloc(count * sizeof(float));
+        if (!vectors) { free(hp); free(vp); return -5; }
     }
 
-    FILE* vf = fopen(vectors_path, "rb");
-    if (!vf) {
-        free(vectors);
-        free(header_path); free(vectors_path);
-        return -2;
+    FILE* vf = fopen(vp, "rb");
+    if (!vf) { free(vectors); free(hp); free(vp); return -2; }
+
+    /* Live data must be present. Tail may be short for v1 files. */
+    size_t live = (size_t)n * (size_t)dim;
+    if (live > 0) {
+        if (fread(vectors, sizeof(float), live, vf) != live) {
+            fclose(vf); free(vectors); free(hp); free(vp);
+            return -3;
+        }
     }
-    if (fread(vectors, sizeof(float), count, vf) != count) {
-        fclose(vf);
-        free(vectors);
-        free(header_path); free(vectors_path);
-        return -3;
+    /* Zero the tail so behaviour is deterministic. */
+    if (count > live) {
+        memset(vectors + live, 0, (count - live) * sizeof(float));
     }
     fclose(vf);
 
     int handle = handle_alloc();
     if (handle < 0) {
-        free(vectors);
-        free(header_path); free(vectors_path);
+        free(vectors); free(hp); free(vp);
         return -6;
     }
 
-    g_slots[handle].in_use = 1;
-    g_slots[handle].path = (char*)malloc(strlen(path) + 1);
-    if (!g_slots[handle].path) {
-        g_slots[handle].in_use = 0;
-        free(vectors);
-        free(header_path); free(vectors_path);
+    char* path_copy = (char*)malloc(strlen(path) + 1);
+    if (!path_copy) {
+        free(vectors); free(hp); free(vp);
         return -5;
     }
-    strcpy(g_slots[handle].path, path);
+    strcpy(path_copy, path);
+
+    g_slots[handle].in_use = 1;
+    g_slots[handle].path = path_copy;
     g_slots[handle].n = n;
     g_slots[handle].dim = dim;
+    g_slots[handle].capacity = capacity;
+    g_slots[handle].version = (int)version;
     g_slots[handle].vectors = vectors;
 
-    free(header_path); free(vectors_path);
+    free(hp); free(vp);
     return handle;
 }
 
@@ -244,6 +278,95 @@ int storage_close(int handle) {
     g_slots[handle].vectors = NULL;
     g_slots[handle].n = 0;
     g_slots[handle].dim = 0;
+    g_slots[handle].capacity = 0;
+    g_slots[handle].version = 0;
     g_slots[handle].in_use = 0;
+    return 0;
+}
+
+int storage_insert(int handle, const float* vector) {
+    if (!handle_valid(handle)) return -1;
+    if (!vector) return -1;
+
+    storage_slot_t* s = &g_slots[handle];
+    if (s->version != 2) return -3;
+
+    int dim = s->dim;
+    int n = s->n;
+    int capacity = s->capacity;
+
+    if (n < capacity) {
+        /* room in place: write to memory AND to disk */
+        memcpy(s->vectors + (size_t)n * dim, vector, (size_t)dim * sizeof(float));
+        s->n = n + 1;
+
+        int rc = write_header_v2(s->path, s->n, dim, capacity);
+        if (rc != 0) {
+            s->n = n;
+            return rc;
+        }
+        rc = write_vectors(s->path, s->vectors, s->n, dim, capacity);
+        if (rc != 0) {
+            s->n = n;
+            return rc;
+        }
+        return n;
+    }
+
+    /* grow */
+    int new_capacity = capacity * 2;
+    if (new_capacity <= capacity) new_capacity = capacity + 1;
+    if (new_capacity < 1) new_capacity = 1;
+
+    size_t new_count = (size_t)new_capacity * (size_t)dim;
+    float* new_vectors = (float*)realloc(s->vectors, new_count * sizeof(float));
+    if (!new_vectors) return -5;
+
+    memset(new_vectors + (size_t)capacity * dim, 0,
+           (size_t)(new_capacity - capacity) * (size_t)dim * sizeof(float));
+
+    memcpy(new_vectors + (size_t)n * dim, vector, (size_t)dim * sizeof(float));
+
+    int rc = write_header_v2(s->path, n + 1, dim, new_capacity);
+    if (rc != 0) return rc;
+
+    rc = write_vectors(s->path, new_vectors, n + 1, dim, new_capacity);
+    if (rc != 0) return rc;
+
+    s->vectors = new_vectors;
+    s->n = n + 1;
+    s->capacity = new_capacity;
+    return n;
+}
+
+
+int storage_delete(int handle, int index) {
+    if (!handle_valid(handle)) return -1;
+    if (index < 0) return -7;
+
+    storage_slot_t* s = &g_slots[handle];
+    if (s->version != 2) return -3;
+
+    int n = s->n;
+    int dim = s->dim;
+
+    if (index >= n) return -7;
+
+    /* compact: shift everything after index down by one */
+    if (index < n - 1) {
+        memmove(s->vectors + (size_t)index * dim,
+                s->vectors + (size_t)(index + 1) * dim,
+                (size_t)(n - index - 1) * (size_t)dim * sizeof(float));
+    }
+    /* zero the last live slot */
+    memset(s->vectors + (size_t)(n - 1) * dim, 0, (size_t)dim * sizeof(float));
+
+    int rc = write_header_v2(s->path, n - 1, dim, s->capacity);
+    if (rc != 0) return rc;
+
+    rc = write_vectors(s->path, s->vectors, n - 1, dim, s->capacity);
+    if (rc != 0) return rc;
+
+    s->n = n - 1;
     return 0;
 }

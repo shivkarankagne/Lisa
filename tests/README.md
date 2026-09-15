@@ -183,3 +183,46 @@ What the storage tests verify:
 
 Storage v1 does not perform distance calculations, top-k, or search.
 It hands vectors to the existing retrieval API. Retrieval owns search.
+
+## Storage mutation tests
+
+### Storage v1.1 — insert and delete
+
+    gcc -O0 -g -o test_storage_mutation \
+        test_storage_mutation.c \
+        ../src/storage/storage.c \
+        ../src/retrieval/retrieval_scalar.c \
+        ../src/kernels/arm64/lisa_asm_wrapper.c \
+        ../src/kernels/arm64/lisa_ultra_mac.s \
+        -lm
+    ./test_storage_mutation
+
+### With sanitizers
+
+    gcc -O0 -g -fsanitize=address,undefined -fno-omit-frame-pointer \
+        -o test_storage_mutation_asan \
+        test_storage_mutation.c \
+        ../src/storage/storage.c \
+        ../src/retrieval/retrieval_scalar.c \
+        ../src/kernels/arm64/lisa_asm_wrapper.c \
+        ../src/kernels/arm64/lisa_ultra_mac.s \
+        -lm
+    ./test_storage_mutation_asan
+
+What the mutation tests verify:
+
+- storage_insert grows the collection geometrically when at capacity
+- storage_insert in place writes both memory and disk (this was a real bug)
+- storage_delete at middle, last, and first positions compacts correctly
+- on-disk vectors after insert, after delete, and after reopen match expectations
+- search on a reopened collection matches search on the expected data
+- storage_delete out-of-range returns -7
+- storage_insert and storage_delete on a version 1 collection return -3
+- all of the above pass under AddressSanitizer and UndefinedBehaviorSanitizer
+
+Storage v1.1 known limitations (documented in src/storage/storage.h):
+
+- storage_delete is O((n-1) * dim) I/O and shifts subsequent indices
+- storage_insert may rewrite the whole file when capacity grows
+- no concurrency control, single process only
+- no crash recovery
