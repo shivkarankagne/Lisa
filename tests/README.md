@@ -141,3 +141,45 @@ If any of the three fails, the case is reported as a real failure with
 the exact case, position, indices, and distances.
 
 This rule is implemented in `fuzz_compare.py` and used by `fuzz_run.sh`.
+
+## Storage tests
+
+### Storage v1
+
+    gcc -O0 -g -o test_storage \
+        test_storage.c \
+        ../src/storage/storage.c \
+        ../src/retrieval/retrieval_scalar.c \
+        ../src/kernels/arm64/lisa_asm_wrapper.c \
+        ../src/kernels/arm64/lisa_ultra_mac.s \
+        -lm
+    ./test_storage
+
+### Storage v1 with sanitizers
+
+    gcc -O0 -g -fsanitize=address,undefined -fno-omit-frame-pointer \
+        -o test_storage_asan \
+        test_storage.c \
+        ../src/storage/storage.c \
+        ../src/retrieval/retrieval_scalar.c \
+        ../src/kernels/arm64/lisa_asm_wrapper.c \
+        ../src/kernels/arm64/lisa_ultra_mac.s \
+        -lm
+    ./test_storage_asan
+
+What the storage tests verify:
+
+- storage_create writes a valid collection directory
+- storage_create refuses to overwrite an existing directory
+- storage_open returns a valid handle for a valid collection
+- storage_get_n and storage_get_dim report the correct values
+- stored vectors are byte-identical to the input
+- a top-k search on stored vectors produces the same result as a search
+  on the same vectors held in RAM
+- storage_close releases the handle
+- reopening the collection returns the same vectors
+- storage_open rejects a collection with a bad magic header
+- all of the above pass under AddressSanitizer and UndefinedBehaviorSanitizer
+
+Storage v1 does not perform distance calculations, top-k, or search.
+It hands vectors to the existing retrieval API. Retrieval owns search.
