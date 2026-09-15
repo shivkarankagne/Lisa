@@ -38,3 +38,6 @@ query_64_space.txt
 # Storage test binaries
 tests/test_storage
 tests/test_storage_asan
+
+# CLI test helper
+tests/build_collection

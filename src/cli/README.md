@@ -5,27 +5,41 @@ Command-line interface for the LISA retrieval engine.
 ## Usage
 
     lisa --index <file> --dim <int> --query <file> [--topk <int>]
+    lisa --collection <dir> --query <file> [--topk <int>]
 
 ## Flags
 
 | Flag | Required | Default | Meaning |
 | :--- | :--- | :--- | :--- |
-| `--index` | yes | — | Path to binary vector file |
-| `--dim` | yes | — | Dimension of vectors |
+| `--index` | one of index/collection | — | Path to binary vector file |
+| `--collection` | one of index/collection | — | Path to a storage collection directory |
+| `--dim` | required with `--index`; optional with `--collection` | — | Dimension of vectors |
 | `--query` | yes | — | Path to query file |
 | `--topk` | no | 5 | Number of results |
 | `--help` | no | — | Print usage |
 
+`--index` and `--collection` are mutually exclusive.
+
 ## Input formats
 
-### Index file
+### Index file (`--index`)
 
 Binary, little-endian:
 
 - 8 bytes header: `int32 n`, `int32 dim`
 - `n * dim` float32 values, row-major
 
-### Query file
+### Collection directory (`--collection`)
+
+Directory previously created by `storage_create`. Contains:
+
+- `header.bin` — 16 bytes: magic "LISA", version, n, dim
+- `vectors.bin` — `n * dim` float32, row-major
+
+The vector layout is identical to the index file. Searching a collection
+produces the same results as searching an equivalent index file.
+
+### Query file (`--query`)
 
 Text. Floats separated by whitespace or commas. Must contain exactly `dim` values.
 
@@ -47,12 +61,19 @@ No header. No decoration. Machine-readable.
 | 3 | Query file error |
 | 4 | Dimension mismatch |
 | 5 | Retrieval engine error |
+| 6 | Storage error |
 
-## Example
+## Examples
+
+### Search a binary index file
 
     lisa --index vectors_768.bin --dim 768 --topk 5 --query query_768.txt
 
-Output:
+### Search a storage collection
+
+    lisa --collection /path/to/collection --topk 5 --query query_768.txt
+
+Both produce the same output format:
 
     6797 108.174782
     5564 109.033485
@@ -67,6 +88,7 @@ Output:
         src/retrieval/retrieval_scalar.c \
         src/kernels/arm64/lisa_asm_wrapper.c \
         src/kernels/arm64/lisa_ultra_mac.s \
+        src/storage/storage.c \
         -lm
 
 ## Non-goals
@@ -75,8 +97,8 @@ This CLI does not:
 
 - serve HTTP
 - run as a daemon
-- manage storage
-- manage memory
+- create collections
+- insert, update, or delete records
 - provide JSON output
 - provide configuration files
 

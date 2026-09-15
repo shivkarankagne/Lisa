@@ -9,6 +9,8 @@ QRY=~/lisa_assembly/query_768.txt
 DIM=768
 TOPK=5
 
+COLL=/tmp/lisa_cli_test_collection
+
 if [ ! -x "$BIN" ]; then
     echo "FAIL: binary not found: $BIN"
     exit 1
@@ -43,12 +45,14 @@ check() {
 
 echo "CLI tests"
 
+# Existing --index path (unchanged)
 check "success" 0 --index "$IDX" --dim "$DIM" --topk "$TOPK" --query "$QRY"
 check "missing index file" 2 --index /nonexistent --dim "$DIM" --query "$QRY"
 check "dimension mismatch" 4 --index "$IDX" --dim 64 --query "$QRY"
 check "missing query file" 3 --index "$IDX" --dim "$DIM" --query /nonexistent
 check "missing arg" 1 --index "$IDX"
 
+# Existing output shape (unchanged)
 LINES=$("$BIN" --index "$IDX" --dim "$DIM" --topk "$TOPK" --query "$QRY" | wc -l | tr -d ' ')
 if [ "$LINES" -eq "$TOPK" ]; then
     echo "  PASS: output line count ($LINES)"
@@ -56,6 +60,47 @@ if [ "$LINES" -eq "$TOPK" ]; then
 else
     echo "  FAIL: output line count ($LINES, want $TOPK)"
     FAIL=$((FAIL + 1))
+fi
+
+# Prepare a storage collection for the --collection tests.
+# We build it from the existing index file using a tiny helper.
+BUILD_COLL=~/lisa_assembly/tests/build_collection
+if [ ! -x "$BUILD_COLL" ]; then
+    echo "  SKIP: collection tests (build_collection helper not present)"
+else
+    rm -rf "$COLL"
+    "$BUILD_COLL" "$IDX" "$COLL" > /dev/null 2>&1
+    if [ -d "$COLL" ]; then
+
+        # --collection must produce identical output to --index
+        OUT_IDX=$("$BIN" --index "$IDX" --dim "$DIM" --topk "$TOPK" --query "$QRY")
+        OUT_COL=$("$BIN" --collection "$COLL" --topk "$TOPK" --query "$QRY")
+        if [ "$OUT_IDX" = "$OUT_COL" ]; then
+            echo "  PASS: --collection output matches --index"
+            PASS=$((PASS + 1))
+        else
+            echo "  FAIL: --collection output differs from --index"
+            FAIL=$((FAIL + 1))
+        fi
+
+        # --collection with matching --dim
+        check "collection with --dim" 0 --collection "$COLL" --dim "$DIM" --topk "$TOPK" --query "$QRY"
+
+        # --collection with mismatched --dim
+        check "collection with wrong --dim" 4 --collection "$COLL" --dim 64 --query "$QRY"
+
+        # --collection with missing directory
+        check "collection missing" 6 --collection /nonexistent --query "$QRY"
+
+        # --index and --collection together
+        check "index and collection together" 1 --index "$IDX" --collection "$COLL" --query "$QRY"
+
+        # cleanup
+        rm -rf "$COLL"
+    else
+        echo "  FAIL: could not build test collection"
+        FAIL=$((FAIL + 1))
+    fi
 fi
 
 echo ""

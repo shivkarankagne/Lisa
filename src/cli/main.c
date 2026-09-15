@@ -4,17 +4,20 @@
 #include <stdint.h>
 
 #include "../retrieval/retrieval.h"
+#include "../storage/storage.h"
 
 /*
  * LISA CLI
  *
  * Usage:
- *   lisa --index <file> --dim <int> --topk <int> --query <file>
+ *   lisa --index <file> --dim <int> --query <file> [--topk <int>]
+ *   lisa --collection <dir>        --query <file> [--topk <int>]
  *
  * Inputs:
- *   --index <file>  Binary. Header: int32 n, int32 dim (little-endian).
- *                   Body:   n * dim float32 little-endian, row-major.
- *   --query <file>  Text. Floats separated by whitespace or commas.
+ *   --index <file>       Binary. Header: int32 n, int32 dim (LE).
+ *                        Body:   n * dim float32 LE, row-major.
+ *   --collection <dir>   Directory previously created by storage_create.
+ *   --query <file>       Text. Floats separated by whitespace or commas.
  *
  * Output:
  *   One line per result, ascending by distance:
@@ -27,6 +30,7 @@
  *   3  query file error
  *   4  dimension mismatch
  *   5  retrieval engine error
+ *   6  storage error
  */
 
 extern int lisa_search_exact_asm(
@@ -40,8 +44,9 @@ extern int lisa_search_exact_asm(
 
 static void usage(const char* prog) {
     fprintf(stderr,
-        "usage: %s --index <file> --dim <int> --query <file> [--topk <int>]\n",
-        prog);
+        "usage: %s --index <file> --dim <int> --query <file> [--topk <int>]\n"
+        "       %s --collection <dir> --query <file> [--topk <int>]\n",
+        prog, prog);
 }
 
 static int load_index(const char* path, float** out_vectors, int* out_n, int* out_dim) {
@@ -129,6 +134,7 @@ static int load_query(const char* path, int dim, float** out_query) {
 
 int main(int argc, char** argv) {
     const char* index_path = NULL;
+    const char* collection_path = NULL;
     const char* query_path = NULL;
     int dim_arg = 0;
     int topk = 5;
@@ -136,6 +142,8 @@ int main(int argc, char** argv) {
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--index") == 0 && i + 1 < argc) {
             index_path = argv[++i];
+        } else if (strcmp(argv[i], "--collection") == 0 && i + 1 < argc) {
+            collection_path = argv[++i];
         } else if (strcmp(argv[i], "--query") == 0 && i + 1 < argc) {
             query_path = argv[++i];
         } else if (strcmp(argv[i], "--dim") == 0 && i + 1 < argc) {
@@ -152,7 +160,18 @@ int main(int argc, char** argv) {
         }
     }
 
-    if (!index_path || !query_path || dim_arg <= 0 || topk <= 0) {
+    if (index_path && collection_path) {
+        fprintf(stderr, "error: --index and --collection are mutually exclusive\n");
+        usage(argv[0]);
+        return 1;
+    }
+
+    if (!query_path || topk <= 0) {
+        usage(argv[0]);
+        return 1;
+    }
+
+    if (!index_path && !collection_path) {
         usage(argv[0]);
         return 1;
     }
@@ -160,19 +179,57 @@ int main(int argc, char** argv) {
     float* vectors = NULL;
     int n = 0;
     int dim = 0;
-    if (load_index(index_path, &vectors, &n, &dim) != 0) {
-        return 2;
-    }
 
-    if (dim != dim_arg) {
-        fprintf(stderr, "error: index dim=%d, --dim=%d\n", dim, dim_arg);
-        free(vectors);
-        return 4;
+    int storage_handle = 0;
+    int owns_vectors = 0;
+
+    if (index_path) {
+        if (dim_arg <= 0) {
+            usage(argv[0]);
+            return 1;
+        }
+        if (load_index(index_path, &vectors, &n, &dim) != 0) {
+            return 2;
+        }
+        owns_vectors = 1;
+
+        if (dim != dim_arg) {
+            fprintf(stderr, "error: index dim=%d, --dim=%d\n", dim, dim_arg);
+            free(vectors);
+            return 4;
+        }
+    } else {
+        storage_handle = storage_open(collection_path);
+        if (storage_handle < 0) {
+            fprintf(stderr, "error: storage_open failed: %d\n", storage_handle);
+            return 6;
+        }
+
+        int sn = storage_get_n(storage_handle);
+        int sdim = storage_get_dim(storage_handle);
+        const float* svec = storage_get_vectors(storage_handle);
+        if (sn <= 0 || sdim <= 0 || svec == NULL) {
+            fprintf(stderr, "error: storage metadata invalid\n");
+            storage_close(storage_handle);
+            return 6;
+        }
+
+        if (dim_arg > 0 && dim_arg != sdim) {
+            fprintf(stderr, "error: collection dim=%d, --dim=%d\n", sdim, dim_arg);
+            storage_close(storage_handle);
+            return 4;
+        }
+
+        n = sn;
+        dim = sdim;
+        vectors = (float*)svec;
+        owns_vectors = 0;
     }
 
     float* query = NULL;
     if (load_query(query_path, dim, &query) != 0) {
-        free(vectors);
+        if (owns_vectors) free(vectors);
+        if (storage_handle > 0) storage_close(storage_handle);
         return 3;
     }
 
@@ -182,8 +239,10 @@ int main(int argc, char** argv) {
     float* dists = (float*)malloc((size_t)k_eff * sizeof(float));
     if (!indices || !dists) {
         fprintf(stderr, "error: cannot allocate result arrays\n");
-        free(vectors); free(query);
+        if (owns_vectors) free(vectors);
+        free(query);
         free(indices); free(dists);
+        if (storage_handle > 0) storage_close(storage_handle);
         return 5;
     }
 
@@ -197,8 +256,10 @@ int main(int argc, char** argv) {
     int rc = lisa_search_exact_asm(query, vectors, n, dim, k_eff, &result);
     if (rc != 0) {
         fprintf(stderr, "error: retrieval engine returned %d\n", rc);
-        free(vectors); free(query);
+        if (owns_vectors) free(vectors);
+        free(query);
         free(indices); free(dists);
+        if (storage_handle > 0) storage_close(storage_handle);
         return 5;
     }
 
@@ -206,9 +267,10 @@ int main(int argc, char** argv) {
         printf("%d %.6f\n", result.indices[i], result.dists[i]);
     }
 
-    free(vectors);
+    if (owns_vectors) free(vectors);
     free(query);
     free(indices);
     free(dists);
+    if (storage_handle > 0) storage_close(storage_handle);
     return 0;
 }
