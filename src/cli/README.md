@@ -103,3 +103,15 @@ This CLI does not:
 - provide configuration files
 
 Those are separate work packages.
+
+## Building
+
+From the repository root:
+
+    make
+
+Produces `build/lisa`. See the root `README.md` for the full build
+and test instructions.
+
+The link line is defined only in the root `Makefile`. Do not duplicate
+it here.
