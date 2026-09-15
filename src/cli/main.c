@@ -5,6 +5,7 @@
 
 #include "../retrieval/retrieval.h"
 #include "../storage/storage.h"
+#include "../api/http.h"
 
 /*
  * LISA CLI
@@ -45,8 +46,9 @@ extern int lisa_search_exact_asm(
 static void usage(const char* prog) {
     fprintf(stderr,
         "usage: %s --index <file> --dim <int> --query <file> [--topk <int>]\n"
-        "       %s --collection <dir> --query <file> [--topk <int>]\n",
-        prog, prog);
+        "       %s --collection <dir> --query <file> [--topk <int>]\n"
+        "       %s --serve --port <int>\n",
+        prog, prog, prog);
 }
 
 static int load_index(const char* path, float** out_vectors, int* out_n, int* out_dim) {
@@ -138,6 +140,8 @@ int main(int argc, char** argv) {
     const char* query_path = NULL;
     int dim_arg = 0;
     int topk = 5;
+    int serve = 0;
+    int port = 0;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--index") == 0 && i + 1 < argc) {
@@ -150,6 +154,10 @@ int main(int argc, char** argv) {
             dim_arg = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--topk") == 0 && i + 1 < argc) {
             topk = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--serve") == 0) {
+            serve = 1;
+        } else if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
+            port = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             usage(argv[0]);
             return 0;
@@ -158,6 +166,20 @@ int main(int argc, char** argv) {
             usage(argv[0]);
             return 1;
         }
+    }
+
+    if (serve) {
+        if (port <= 0 || port > 65535) {
+            fprintf(stderr, "error: --serve requires --port <1-65535>\n");
+            usage(argv[0]);
+            return 1;
+        }
+        int rc = lisa_http_serve(port);
+        if (rc != 0) {
+            fprintf(stderr, "error: lisa_http_serve failed: %d\n", rc);
+            return 5;
+        }
+        return 0;
     }
 
     if (index_path && collection_path) {

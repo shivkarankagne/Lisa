@@ -226,3 +226,20 @@ Storage v1.1 known limitations (documented in src/storage/storage.h):
 - storage_insert may rewrite the whole file when capacity grows
 - no concurrency control, single process only
 - no crash recovery
+
+## HTTP API tests
+
+    ./test_api.sh
+
+What the API tests verify:
+
+- GET /health returns 200 with body "ok"
+- unknown paths return 404
+- POST /search with a valid collection returns 200, three lines,
+  first result is index 3 or 4 (a tie)
+- POST /search with a missing collection returns 404
+- POST /search with a wrong body size returns 400
+- POST /search without a collection parameter returns 400
+
+The server listens on 127.0.0.1 only. No TLS, no authentication.
+Read-only endpoints only.

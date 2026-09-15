@@ -2,13 +2,6 @@
 #
 # Produces one native executable: build/lisa
 #
-# Sources:
-#   src/cli/main.c                       CLI entry point
-#   src/retrieval/retrieval_scalar.c     scalar reference
-#   src/storage/storage.c                storage engine
-#   src/kernels/arm64/lisa_asm_wrapper.c top-k + padding wrapper
-#   src/kernels/arm64/lisa_ultra_mac.s   ARM64 NEON kernel
-#
 # Flags note:
 #   -O0 is used deliberately. On the current ARM64 macOS toolchain,
 #   -O2 was observed to miscompile comparison logic in test code.
@@ -16,7 +9,6 @@
 #   Do not change these flags without a separate, measured package.
 
 CC      := gcc
-AS      := as
 CFLAGS  := -O0 -g
 LDFLAGS := -lm
 
@@ -27,6 +19,7 @@ SOURCES := \
     $(SRC_DIR)/cli/main.c \
     $(SRC_DIR)/retrieval/retrieval_scalar.c \
     $(SRC_DIR)/storage/storage.c \
+    $(SRC_DIR)/api/http.c \
     $(SRC_DIR)/kernels/arm64/lisa_asm_wrapper.c \
     $(SRC_DIR)/kernels/arm64/lisa_ultra_mac.s
 

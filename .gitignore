@@ -45,3 +45,6 @@ tests/build_collection
 # Storage mutation test binaries
 tests/test_storage_mutation
 tests/test_storage_mutation_asan
+
+# ASan build for API tests
+build/lisa_asan

@@ -86,3 +86,19 @@ MIT.
 ---
 
 *Built by LISA.*
+
+---
+
+## HTTP API
+
+Start the read-only API:
+
+    lisa --serve --port 8080
+
+Endpoints:
+
+    GET  /health
+    POST /search?collection=<dir>&topk=<n>
+
+See `src/cli/README.md` for the full contract. The server binds to
+127.0.0.1 only. No TLS, no authentication.

@@ -115,3 +115,26 @@ and test instructions.
 
 The link line is defined only in the root `Makefile`. Do not duplicate
 it here.
+
+## Server mode
+
+    lisa --serve --port <1-65535>
+
+Starts the read-only HTTP API. Blocks until terminated.
+
+Endpoints:
+
+    GET  /health
+         -> 200, body "ok\n"
+
+    POST /search?collection=<path>&topk=<int>
+         Headers: Content-Type: application/octet-stream
+         Body:    dim * float32 LE
+         -> 200, body text, one line per result:
+                <index> <distance>\n
+         -> 400 malformed request
+         -> 404 collection not found
+         -> 500 internal error
+
+The server binds to 127.0.0.1 only. No TLS, no authentication,
+no write endpoints.
