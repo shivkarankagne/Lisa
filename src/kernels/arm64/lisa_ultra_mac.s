@@ -1,11 +1,22 @@
 // LISA ULTRA — ARM64 NEON kernel (macOS)
 // FIX: compare byte offset against dim * 4, not dim
+//
+// ABI (AAPCS64):
+//   x0 = query, x1 = vectors, w2 = n (int), w3 = dim (int), w4 = k (unused),
+//   x5 = out_dists, x6 = out_indices.
+//   The upper 32 bits of w2/w3 are undefined on entry, so they are
+//   sign-extended before any 64-bit use.
+//   Only caller-saved SIMD registers (v0-v7, v16-v31) are used.
+//   v8-v15 (d8-d15) are callee-saved and must not be touched.
 .global _lisa_search_ultra
 .align 4
 
 _lisa_search_ultra:
     stp x29, x30, [sp, #-16]!
     mov x29, sp
+
+    sxtw x2, w2            // n:   int -> int64
+    sxtw x3, w3            // dim: int -> int64
 
     // x3 = dim (floats)
     // Compute total bytes = dim * 4
@@ -30,8 +41,8 @@ _lisa_search_ultra:
     ldr q4, [x0, x15]      // query[byte offset]
     ldr q5, [x14, x15]     // vector[byte offset]
 
-    fsub v8.4s, v4.4s, v5.4s
-    fmla v0.4s, v8.4s, v8.4s
+    fsub v6.4s, v4.4s, v5.4s
+    fmla v0.4s, v6.4s, v6.4s
 
     add x15, x15, #16      // advance 4 floats = 16 bytes
     b .dim_loop
