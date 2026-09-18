@@ -54,12 +54,33 @@ int lisa_search(
     int64_t k,
     lisa_result_t* result
 ) {
+    return lisa_search_masked(query, vectors, n, dim, k, NULL, result);
+}
+
+int lisa_search_masked(
+    const float* query,
+    const float* vectors,
+    int64_t n,
+    int64_t dim,
+    int64_t k,
+    const uint8_t* live,
+    lisa_result_t* result
+) {
     if (query == NULL || vectors == NULL || result == NULL) return -1;
     if (n <= 0 || dim <= 0 || k <= 0) return -2;
     if (n > INT32_MAX) return -2;  /* result indices are int */
     if (result->indices == NULL || result->dists == NULL) return -3;
 
-    int64_t k_eff = (k < n) ? k : n;
+    int64_t candidates = n;
+    if (live != NULL) {
+        candidates = 0;
+        for (int64_t i = 0; i < n; i++) candidates += live[i] ? 1 : 0;
+        if (candidates == 0) {
+            result->n_returned = 0;
+            return 0;
+        }
+    }
+    int64_t k_eff = (k < candidates) ? k : candidates;
 
     node_t stack_heap[256];
     node_t* heap = stack_heap;
@@ -77,6 +98,7 @@ int lisa_search(
         l2_batch(query, vectors + base * dim, count, dim, dists);
 
         for (int64_t j = 0; j < count; j++) {
+            if (live != NULL && !live[base + j]) continue;
             float d = dists[j];
             if (size < k_eff) {
                 heap[size].dist = d;

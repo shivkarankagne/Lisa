@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "../src/kernels/kernels.h"
 #include "../src/retrieval/retrieval.h"
@@ -79,6 +80,57 @@ static int compare_case(int n, int dim, int k, unsigned seed) {
     return fail;
 }
 
+/*
+ * Masked search vs the reference run on a compacted copy containing only
+ * the live vectors. Returns 0 on agreement.
+ */
+static int compare_masked(int n, int dim, int k, unsigned seed, int live_pct) {
+    float* v = malloc((size_t)n * dim * sizeof(float));
+    float* c = malloc((size_t)n * dim * sizeof(float));
+    int* map = malloc((size_t)n * sizeof(int));
+    uint8_t* live = malloc((size_t)n);
+    float* q = malloc((size_t)dim * sizeof(float));
+    int* ir = malloc((size_t)k * sizeof(int));
+    float* dr = malloc((size_t)k * sizeof(float));
+    int* is = malloc((size_t)k * sizeof(int));
+    float* ds = malloc((size_t)k * sizeof(float));
+    int fail = 0;
+    if (!v || !c || !map || !live || !q || !ir || !dr || !is || !ds) { fail = 1; goto out; }
+
+    srand(seed);
+    for (int i = 0; i < n * dim; i++) v[i] = (float)rand() / (float)RAND_MAX;
+    for (int i = 0; i < dim; i++) q[i] = (float)rand() / (float)RAND_MAX;
+    int m = 0;
+    for (int i = 0; i < n; i++) {
+        live[i] = (uint8_t)((rand() % 100) < live_pct);
+        if (live[i]) {
+            memcpy(c + (size_t)m * dim, v + (size_t)i * dim, (size_t)dim * sizeof(float));
+            map[m++] = i;
+        }
+    }
+
+    lisa_result_t got = { is, ds, k, 0 };
+    if (lisa_search_masked(q, v, n, dim, k, live, &got) != 0) { fail = 1; goto out; }
+    if (m == 0) { fail = got.n_returned != 0; goto out; }
+
+    lisa_result_t ref = { ir, dr, k, 0 };
+    if (lisa_search_exact(q, c, m, dim, k, &ref) != 0 || ref.n_returned != got.n_returned) {
+        fail = 1; goto out;
+    }
+    for (int i = 0; i < got.n_returned; i++) {
+        if (!live[is[i]] || !near(dr[i], ds[i])) {
+            printf("  FAIL: masked n=%d dim=%d k=%d pos=%d ref=(%d,%.9g) got=(%d,%.9g)\n",
+                   n, dim, k, i, map[ir[i]], dr[i], is[i], ds[i]);
+            fail = 1;
+            break;
+        }
+    }
+out:
+    free(v); free(c); free(map); free(live); free(q);
+    free(ir); free(dr); free(is); free(ds);
+    return fail;
+}
+
 int main(void) {
     printf("Search tests (kernel: %s)\n", lisa_kernels()->name);
 
@@ -139,6 +191,26 @@ int main(void) {
         fail |= compare_case(n, dim, k, s);
     }
     check(!fail, "agrees with scalar reference on 209 cases");
+
+    /* Masked search. */
+    uint8_t none[2] = { 0, 0 };
+    check(lisa_search_masked(q, v, 2, 4, 2, none, &r) == 0 && r.n_returned == 0,
+          "masked: nothing live -> 0 results");
+    uint8_t second[2] = { 0, 1 };
+    check(lisa_search_masked(q, v, 2, 4, 2, second, &r) == 0 && r.n_returned == 1 &&
+          idx[0] == 1, "masked: dead vector never returned, k clamps to live count");
+    check(lisa_search_masked(NULL, v, 2, 4, 2, second, &r) == -1, "masked: NULL query -> -1");
+
+    int mfail = 0;
+    for (unsigned s2 = 0; s2 < 60; s2++) {
+        srand(s2 * 104729u + 7u);
+        int n = 1 + rand() % 1200;
+        int dim = 1 + rand() % 300;
+        int k = 1 + rand() % 40;
+        int pct = (int)(s2 % 4) * 30 + 5;   /* 5%, 35%, 65%, 95% live */
+        mfail |= compare_masked(n, dim, k, s2, pct);
+    }
+    check(!mfail, "masked search agrees with reference on compacted data (60 cases)");
 
     if (g_fail) {
         printf("FAIL: search tests\n");

@@ -92,4 +92,22 @@ int lisa_search(
     lisa_result_t* result
 );
 
+/*
+ * lisa_search restricted to vectors whose live[i] is non-zero.
+ *
+ * live: n bytes, or NULL for all vectors (then identical to lisa_search).
+ * Skipped vectors are never returned. If no vector is live, returns 0
+ * with n_returned = 0. Same errors as lisa_search. Used by storage v2 to
+ * skip deleted slots; also the base for metadata filtering (W7).
+ */
+int lisa_search_masked(
+    const float* query,
+    const float* vectors,
+    int64_t n,
+    int64_t dim,
+    int64_t k,
+    const uint8_t* live,
+    lisa_result_t* result
+);
+
 #endif /* LISA_RETRIEVAL_H */
