@@ -3,7 +3,7 @@
 #include <math.h>
 #include "../src/retrieval/retrieval.h"
 
-extern int lisa_search_exact_asm(const float*, const float*, int, int, int, lisa_result_t*);
+#include "../src/kernels/arm64/lisa_asm.h"
 
 int main(void) {
     int n = 416, dim = 1, k = 17;

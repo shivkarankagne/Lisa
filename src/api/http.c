@@ -15,14 +15,7 @@
 #include "../retrieval/retrieval.h"
 #include "../storage/storage.h"
 
-extern int lisa_search_exact_asm(
-    const float* query,
-    const float* vectors,
-    int n,
-    int dim,
-    int k,
-    lisa_result_t* result
-);
+#include "../kernels/arm64/lisa_asm.h"
 
 #define LISA_HTTP_MAX_BODY (4 * 1024 * 1024)   /* 4 MB cap */
 #define LISA_HTTP_BUF      8192

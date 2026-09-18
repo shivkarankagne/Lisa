@@ -3,7 +3,7 @@
 #include <math.h>
 #include "../src/retrieval/retrieval.h"
 
-extern int lisa_search_exact_asm(const float*, const float*, int, int, int, lisa_result_t*);
+#include "../src/kernels/arm64/lisa_asm.h"
 
 static int compare(int n, int dim, int k, unsigned seed) {
     srand(seed);

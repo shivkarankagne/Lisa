@@ -34,14 +34,7 @@
  *   6  storage error
  */
 
-extern int lisa_search_exact_asm(
-    const float* query,
-    const float* vectors,
-    int n,
-    int dim,
-    int k,
-    lisa_result_t* result
-);
+#include "../kernels/arm64/lisa_asm.h"
 
 static void usage(const char* prog) {
     fprintf(stderr,
