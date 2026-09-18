@@ -86,9 +86,18 @@ target_compile_definitions(lisa_sqlite PUBLIC
 )
 target_compile_options(lisa_sqlite PRIVATE -w)
 
+# ---- version: include/lisa.h must match project(VERSION) ---------------
+
+file(STRINGS include/lisa.h LISA_HEADER_VERSION REGEX "^#define LISA_VERSION_STRING ")
+string(REGEX REPLACE ".*\"(.*)\".*" "\\1" LISA_HEADER_VERSION "${LISA_HEADER_VERSION}")
+if(NOT LISA_HEADER_VERSION STREQUAL PROJECT_VERSION)
+    message(FATAL_ERROR "include/lisa.h version ${LISA_HEADER_VERSION} != project version ${PROJECT_VERSION}")
+endif()
+
 # ---- core library ------------------------------------------------------
 
 add_library(lisa_core STATIC
+    src/api/lisa_api.c
     src/platform/platform_posix.c
     src/kernels/registry.c
     src/kernels/kernels_scalar.c
@@ -100,7 +109,7 @@ add_library(lisa_core STATIC
     src/kernels/arm64/lisa_asm_wrapper.c
     src/kernels/arm64/lisa_ultra_mac.s
 )
-target_include_directories(lisa_core PUBLIC src)
+target_include_directories(lisa_core PUBLIC include src)
 target_link_libraries(lisa_core PUBLIC lisa_sqlite m)
 
 # ---- executable --------------------------------------------------------
@@ -143,6 +152,15 @@ if(LISA_BUILD_TESTS)
     add_executable(test_store_crash tests/test_store_crash.c)
     target_link_libraries(test_store_crash PRIVATE lisa_core)
     add_test(NAME test_store_crash COMMAND test_store_crash ${CMAKE_BINARY_DIR}/scratch 40)
+
+    add_executable(test_public_api tests/test_public_api.c)
+    target_link_libraries(test_public_api PRIVATE lisa_core lisa_unity)
+    add_test(NAME test_public_api COMMAND test_public_api ${CMAKE_BINARY_DIR}/scratch)
+
+    add_executable(test_header_cxx tests/test_header_cxx.cpp)
+    target_link_libraries(test_header_cxx PRIVATE lisa_core)
+    target_compile_options(test_header_cxx PRIVATE -Wall -Wextra -pedantic)
+    add_test(NAME test_header_cxx COMMAND test_header_cxx)
 
     add_executable(test_sqlite tests/test_sqlite.c)
     target_link_libraries(test_sqlite PRIVATE lisa_core lisa_sqlite lisa_unity)
