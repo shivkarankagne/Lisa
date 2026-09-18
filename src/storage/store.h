@@ -59,8 +59,8 @@ typedef struct lisa_store lisa_store_t;
 /*
  * Metadata for one chunk. On insert, all strings must be non-NULL
  * (empty strings allowed) and are copied. On read (lisa_store_get),
- * strings are allocated and owned by the lisa_chunk_t; release with
- * lisa_chunk_free().
+ * strings are allocated and owned by the lisa_store_chunk_t; release with
+ * lisa_store_chunk_free().
  */
 typedef struct {
     char*   doc_id;        /* caller-defined document key */
@@ -70,10 +70,10 @@ typedef struct {
     int64_t length;        /* byte length of the chunk */
     char*   text;          /* chunk text */
     char*   content_hash;  /* hash of the source document content */
-} lisa_chunk_t;
+} lisa_store_chunk_t;
 
 /* Free the strings of a chunk returned by lisa_store_get. */
-void lisa_chunk_free(lisa_chunk_t* chunk);
+void lisa_store_chunk_free(lisa_store_chunk_t* chunk);
 
 /*
  * Create a new, empty collection at dir (must not exist; parent must).
@@ -106,7 +106,7 @@ int64_t     lisa_store_count(const lisa_store_t* store);  /* live chunks */
  * receives the new IDs (count entries). All or nothing.
  */
 int lisa_store_insert(lisa_store_t* store, int64_t count, const float* vectors,
-                      const lisa_chunk_t* chunks, uint64_t* out_ids);
+                      const lisa_store_chunk_t* chunks, uint64_t* out_ids);
 
 /*
  * Delete chunks by ID in one transaction. All or nothing: if any ID does
@@ -122,7 +122,7 @@ int lisa_store_delete_doc(lisa_store_t* store, const char* doc_id,
                           int64_t* out_deleted);
 
 /* Read one chunk's metadata. ENOTFOUND if the ID does not exist. */
-int lisa_store_get(lisa_store_t* store, uint64_t id, lisa_chunk_t* out);
+int lisa_store_get(lisa_store_t* store, uint64_t id, lisa_store_chunk_t* out);
 
 /*
  * Copy one chunk's vector (dim floats) into out, as of this handle's view

@@ -353,7 +353,7 @@ static int load_state(lisa_store_t* s) {
 
 /* ---- public API ------------------------------------------------------- */
 
-void lisa_chunk_free(lisa_chunk_t* c) {
+void lisa_store_chunk_free(lisa_store_chunk_t* c) {
     if (c == NULL) return;
     free(c->doc_id);
     free(c->source_path);
@@ -507,13 +507,13 @@ int64_t lisa_store_count(const lisa_store_t* s) {
     return s ? s->live_count : 0;
 }
 
-static int chunk_valid(const lisa_chunk_t* c) {
+static int chunk_valid(const lisa_store_chunk_t* c) {
     return c->doc_id && c->source_path && c->text && c->content_hash &&
            c->chunk_index >= 0 && c->offset >= 0 && c->length >= 0;
 }
 
 int lisa_store_insert(lisa_store_t* s, int64_t count, const float* vectors,
-                      const lisa_chunk_t* chunks, uint64_t* out_ids) {
+                      const lisa_store_chunk_t* chunks, uint64_t* out_ids) {
     if (s == NULL || count <= 0 || vectors == NULL || chunks == NULL) return LISA_STORE_EINVAL;
     if (s->mode != LISA_STORE_WRITE) return LISA_STORE_EREADONLY;
     for (int64_t i = 0; i < count; i++) {
@@ -548,7 +548,7 @@ int lisa_store_insert(lisa_store_t* s, int64_t count, const float* vectors,
             " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?);", -1, &st, NULL) != SQLITE_OK)
         rc = LISA_STORE_EIO;
     for (int64_t i = 0; rc == LISA_STORE_OK && i < count; i++) {
-        const lisa_chunk_t* c = &chunks[i];
+        const lisa_store_chunk_t* c = &chunks[i];
         sqlite3_reset(st);
         sqlite3_bind_int64(st, 1, next_id + i);
         sqlite3_bind_int64(st, 2, slot_count + i);
@@ -705,7 +705,7 @@ int lisa_store_delete_doc(lisa_store_t* s, const char* doc_id, int64_t* out_dele
     return LISA_STORE_OK;
 }
 
-int lisa_store_get(lisa_store_t* s, uint64_t id, lisa_chunk_t* out) {
+int lisa_store_get(lisa_store_t* s, uint64_t id, lisa_store_chunk_t* out) {
     if (s == NULL || out == NULL) return LISA_STORE_EINVAL;
     memset(out, 0, sizeof(*out));
     if (id > (uint64_t)INT64_MAX) return LISA_STORE_ENOTFOUND;
@@ -727,7 +727,7 @@ int lisa_store_get(lisa_store_t* s, uint64_t id, lisa_chunk_t* out) {
         out->content_hash = xstrdup((const char*)sqlite3_column_text(st, 6));
         rc = (out->doc_id && out->source_path && out->text && out->content_hash)
                  ? LISA_STORE_OK : LISA_STORE_ENOMEM;
-        if (rc != LISA_STORE_OK) lisa_chunk_free(out);
+        if (rc != LISA_STORE_OK) lisa_store_chunk_free(out);
     }
     sqlite3_finalize(st);
     return rc;
@@ -910,10 +910,10 @@ int lisa_store_migrate_v1(const char* src_dir, const char* dst_dir,
     lisa_store_t* s = NULL;
     if (rc == LISA_STORE_OK) rc = lisa_store_open(dst_dir, LISA_STORE_WRITE, embedding_model, &s);
 
-    lisa_chunk_t* meta = NULL;
+    lisa_store_chunk_t* meta = NULL;
     if (rc == LISA_STORE_OK && n > 0) {
         int64_t batch = n < MIGRATE_BATCH ? n : MIGRATE_BATCH;
-        meta = (lisa_chunk_t*)calloc((size_t)batch, sizeof(lisa_chunk_t));
+        meta = (lisa_store_chunk_t*)calloc((size_t)batch, sizeof(lisa_store_chunk_t));
         if (meta == NULL) rc = LISA_STORE_ENOMEM;
         for (int64_t i = 0; meta && i < batch; i++) {
             meta[i].doc_id = (char*)"v1";

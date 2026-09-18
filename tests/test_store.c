@@ -28,8 +28,8 @@ static void vec_for(uint64_t id, float* out) {
     for (int j = 0; j < DIM; j++) out[j] = (float)((id * 31 + (uint64_t)j * 7) % 101) / 101.0f;
 }
 
-static lisa_chunk_t chunk_for(const char* doc, int64_t i) {
-    lisa_chunk_t c;
+static lisa_store_chunk_t chunk_for(const char* doc, int64_t i) {
+    lisa_store_chunk_t c;
     c.doc_id = (char*)doc;
     c.chunk_index = i;
     c.source_path = (char*)"/docs/file.txt";
@@ -44,7 +44,7 @@ static lisa_chunk_t chunk_for(const char* doc, int64_t i) {
 static void insert_n(lisa_store_t* s, const char* doc, int64_t n, uint64_t first_expected_id,
                      uint64_t* ids) {
     float* v = malloc((size_t)(n * DIM) * sizeof(float));
-    lisa_chunk_t* c = malloc((size_t)n * sizeof(lisa_chunk_t));
+    lisa_store_chunk_t* c = malloc((size_t)n * sizeof(lisa_store_chunk_t));
     TEST_ASSERT_NOT_NULL(v);
     TEST_ASSERT_NOT_NULL(c);
     for (int64_t i = 0; i < n; i++) {
@@ -123,7 +123,7 @@ static void test_single_writer(void) {
     TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_open(g_dir, LISA_STORE_READ, NULL, &r));
 
     float v[DIM];
-    lisa_chunk_t c = chunk_for("d", 0);
+    lisa_store_chunk_t c = chunk_for("d", 0);
     vec_for(0, v);
     TEST_ASSERT_EQUAL_INT(LISA_STORE_EREADONLY, lisa_store_insert(r, 1, v, &c, NULL));
     uint64_t id = 0;
@@ -148,7 +148,7 @@ static void test_insert_get_and_stable_ids(void) {
     for (int i = 0; i < 5; i++) TEST_ASSERT_EQUAL_UINT64((uint64_t)i, ids[i]);
     TEST_ASSERT_EQUAL_INT64(5, lisa_store_count(s));
 
-    lisa_chunk_t got;
+    lisa_store_chunk_t got;
     TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_get(s, 3, &got));
     TEST_ASSERT_EQUAL_STRING("docA", got.doc_id);
     TEST_ASSERT_EQUAL_INT64(3, got.chunk_index);
@@ -157,7 +157,7 @@ static void test_insert_get_and_stable_ids(void) {
     TEST_ASSERT_EQUAL_INT64(100, got.length);
     TEST_ASSERT_EQUAL_STRING("some chunk text", got.text);
     TEST_ASSERT_EQUAL_STRING("abc123", got.content_hash);
-    lisa_chunk_free(&got);
+    lisa_store_chunk_free(&got);
     for (uint64_t i = 0; i < 5; i++) check_vector(s, i);
 
     /* Delete two; the others keep their IDs and vectors. */
@@ -187,7 +187,7 @@ static void test_insert_and_delete_are_all_or_nothing(void) {
 
     /* A NULL string in the second record rejects the whole batch. */
     float v[2 * DIM] = { 0 };
-    lisa_chunk_t c[2] = { chunk_for("x", 0), chunk_for("x", 1) };
+    lisa_store_chunk_t c[2] = { chunk_for("x", 0), chunk_for("x", 1) };
     c[1].text = NULL;
     TEST_ASSERT_EQUAL_INT(LISA_STORE_EINVAL, lisa_store_insert(s, 2, v, c, NULL));
     TEST_ASSERT_EQUAL_INT(LISA_STORE_EINVAL, lisa_store_insert(s, 0, v, c, NULL));

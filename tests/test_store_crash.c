@@ -95,7 +95,7 @@ static void child(const char* dir, int fd) {
     static sim_t sim;
     memset(&sim, 0, sizeof(sim));
     float v[BATCH * DIM];
-    lisa_chunk_t c[BATCH];
+    lisa_store_chunk_t c[BATCH];
 
     for (int i = 0; i < MAX_OPS; i++) {
         int rc = LISA_STORE_OK;
@@ -218,20 +218,20 @@ static int trial(const char* scratch, int t, unsigned seed) {
             lisa_store_close(st);
             return 1;
         }
-        lisa_chunk_t c;
+        lisa_store_chunk_t c;
         if (lisa_store_get(st, id, &c) != LISA_STORE_OK || c.chunk_index != (int64_t)id) {
             printf("  FAIL: trial %d: metadata for id %llu\n", t, (unsigned long long)id);
-            lisa_chunk_free(&c);
+            lisa_store_chunk_free(&c);
             lisa_store_close(st);
             return 1;
         }
-        lisa_chunk_free(&c);
+        lisa_store_chunk_free(&c);
     }
 
     /* The collection keeps working after recovery. */
     float nv[DIM];
     vec_for(999999, nv);
-    lisa_chunk_t nc = { (char*)"after", 0, (char*)"", 0, 0, (char*)"", (char*)"" };
+    lisa_store_chunk_t nc = { (char*)"after", 0, (char*)"", 0, 0, (char*)"", (char*)"" };
     rc = lisa_store_insert(st, 1, nv, &nc, NULL);
     if (rc == LISA_STORE_OK) rc = lisa_store_compact(st);
     lisa_store_close(st);
