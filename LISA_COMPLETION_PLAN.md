@@ -435,7 +435,8 @@ engineer. Estimates, not commitments.
 - Extension points defined, documented, and tested with no-op
   implementations: `lisa_auth_provider`, `lisa_retrieval_filter`,
   `lisa_audit_sink`, `lisa_storage_crypto`, `lisa_http_routes`.
-- CLI, HTTP, and GUI use only this API.
+- CLI, HTTP, and GUI use only this API. *As built:* met when W9 replaces
+  the current CLI and HTTP server; the GUI uses the W9 HTTP API.
 
 **W4 — Models**
 - Default generation model and embedding model chosen; both licenses

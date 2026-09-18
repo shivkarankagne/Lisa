@@ -36,8 +36,8 @@ W0 (parallel, anytime)
 W1 → W2 → W3 → W4, W5 (parallel) → W6, W7 → W8 → W9 → W10, W11 → W12
 ```
 
-W1 and W2 are done (reports `LISA_REPORT_AND_UPDATE_002.md`, `_003.md`);
-next is **W3**. Check the plan's acceptance criteria for the package you
+W1–W3 are done (reports `LISA_REPORT_AND_UPDATE_002.md`–`_004.md`);
+next is **W4**. Check the plan's acceptance criteria for the package you
 are on; a package is not done until every criterion is met.
 
 ## Non-negotiable rules
@@ -233,7 +233,8 @@ Current:
     src/retrieval/      scalar reference + lisa_search
     src/storage/        storage v2 (store.h); v1.1 (storage.h) until W9
     src/cli/            CLI entry point
-    src/api/            hand-written HTTP server (replaced in W9)
+    include/lisa.h      public API (W3)
+    src/api/            lisa.h implementation (lisa_api.c); hand-written HTTP server (replaced in W9)
     third_party/        sqlite, llama.cpp, unity (see third_party/README.md)
     docs/formats/       on-disk format specs
     tests/  benchmark/  .github/workflows/
