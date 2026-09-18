@@ -95,7 +95,7 @@ claim new numbers without a separate measured package.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Enterprise features are available under a separate commercial license.
 
 ---
 
