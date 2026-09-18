@@ -1,0 +1,11 @@
+# Sanitizer ignore-list for vendored code (used by LISA_SANITIZE builds).
+#
+# Each entry names one function in third-party code, with the reason.
+# Vendored code is not modified (third_party/README.md); findings in LISA's
+# own code are never ignored here.
+
+# ggml (llama.cpp v0.4.1), ggml/src/ggml.c: ggml_graph_nbytes computes a
+# graph's memory layout by advancing a NULL pointer through
+# incr_ptr_aligned and reading back the offset. The pointer is never
+# dereferenced. UBSan reports "applying non-zero offset to null pointer".
+fun:incr_ptr_aligned

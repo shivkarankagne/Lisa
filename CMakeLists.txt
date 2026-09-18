@@ -18,7 +18,6 @@ project(lisa VERSION 0.1.0 LANGUAGES C CXX ASM)
 option(LISA_SANITIZE         "Build with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
 option(LISA_BUILD_TESTS      "Build tests"      ON)
 option(LISA_BUILD_BENCHMARKS "Build benchmarks" OFF)
-option(LISA_BUILD_LLAMA      "Build vendored llama.cpp (model runtime, W4)" ON)
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
@@ -38,6 +37,7 @@ if(LISA_SANITIZE)
         -fsanitize=address,undefined
         -fno-sanitize-recover=all
         -fno-omit-frame-pointer
+        -fsanitize-ignorelist=${CMAKE_SOURCE_DIR}/third_party/sanitizer-ignorelist.txt
     )
     add_link_options(-fsanitize=address,undefined)
 endif()
@@ -45,17 +45,16 @@ endif()
 # ---- llama.cpp (third_party/llama.cpp/INTAKE.md) ------------------------
 # Added before LISA's warning flags, which must not apply to it.
 
-if(LISA_BUILD_LLAMA)
-    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
-    foreach(opt LLAMA_BUILD_COMMON LLAMA_BUILD_TESTS LLAMA_BUILD_TOOLS
-                LLAMA_BUILD_EXAMPLES LLAMA_BUILD_SERVER LLAMA_BUILD_APP
-                LLAMA_BUILD_UI GGML_NATIVE GGML_OPENMP GGML_CCACHE)
-        set(${opt} OFF CACHE BOOL "" FORCE)
-    endforeach()
-    set(GGML_METAL               ON CACHE BOOL "" FORCE)
-    set(GGML_METAL_EMBED_LIBRARY ON CACHE BOOL "" FORCE)
-    add_subdirectory(third_party/llama.cpp EXCLUDE_FROM_ALL)
-endif()
+# Required: LISA's model runtime (W4).
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+foreach(opt LLAMA_BUILD_COMMON LLAMA_BUILD_TESTS LLAMA_BUILD_TOOLS
+            LLAMA_BUILD_EXAMPLES LLAMA_BUILD_SERVER LLAMA_BUILD_APP
+            LLAMA_BUILD_UI GGML_NATIVE GGML_OPENMP GGML_CCACHE)
+    set(${opt} OFF CACHE BOOL "" FORCE)
+endforeach()
+set(GGML_METAL               ON CACHE BOOL "" FORCE)
+set(GGML_METAL_EMBED_LIBRARY ON CACHE BOOL "" FORCE)
+add_subdirectory(third_party/llama.cpp EXCLUDE_FROM_ALL)
 
 # LISA's own code: warnings on.
 add_compile_options(
@@ -98,6 +97,8 @@ endif()
 
 add_library(lisa_core STATIC
     src/api/lisa_api.c
+    src/api/lisa_models.c
+    src/models/models.c
     src/platform/platform_posix.c
     src/kernels/registry.c
     src/kernels/kernels_scalar.c
@@ -110,7 +111,7 @@ add_library(lisa_core STATIC
     src/kernels/arm64/lisa_ultra_mac.s
 )
 target_include_directories(lisa_core PUBLIC include src)
-target_link_libraries(lisa_core PUBLIC lisa_sqlite m)
+target_link_libraries(lisa_core PUBLIC lisa_sqlite m PRIVATE llama vendor::hash)
 
 # ---- executable --------------------------------------------------------
 
@@ -166,11 +167,15 @@ if(LISA_BUILD_TESTS)
     target_link_libraries(test_sqlite PRIVATE lisa_core lisa_sqlite lisa_unity)
     add_test(NAME test_sqlite COMMAND test_sqlite ${CMAKE_BINARY_DIR}/scratch)
 
-    if(LISA_BUILD_LLAMA)
-        add_executable(test_llama_link tests/test_llama_link.c)
-        target_link_libraries(test_llama_link PRIVATE llama lisa_unity)
-        add_test(NAME test_llama_link COMMAND test_llama_link)
-    endif()
+    set(LISA_MODELS_DIR "${CMAKE_SOURCE_DIR}/models" CACHE PATH "Directory with the default model files")
+    add_executable(test_models tests/test_models.c)
+    target_link_libraries(test_models PRIVATE lisa_core llama lisa_unity)
+    add_test(NAME test_models COMMAND test_models ${CMAKE_BINARY_DIR}/scratch ${LISA_MODELS_DIR})
+    set_tests_properties(test_models PROPERTIES TIMEOUT 1800)
+
+    add_executable(test_llama_link tests/test_llama_link.c)
+    target_link_libraries(test_llama_link PRIVATE llama lisa_unity)
+    add_test(NAME test_llama_link COMMAND test_llama_link)
     lisa_c_test(test_search)
     add_test(NAME test_search_scalar COMMAND test_search)
     set_tests_properties(test_search_scalar PROPERTIES ENVIRONMENT "LISA_KERNEL=scalar")
@@ -214,4 +219,6 @@ if(LISA_BUILD_BENCHMARKS)
     target_link_libraries(bench_retrieval PRIVATE lisa_core)
     add_executable(bench_compare benchmark/bench_compare.c)
     target_link_libraries(bench_compare PRIVATE lisa_core)
+    add_executable(bench_models benchmark/bench_models.c)
+    target_link_libraries(bench_models PRIVATE lisa_core)
 endif()

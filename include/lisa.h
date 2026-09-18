@@ -80,7 +80,10 @@ typedef enum lisa_status {
     LISA_E_EXISTS            =  -9,
     LISA_E_DENIED            = -10,  /* refused by an extension (auth, filter) */
     LISA_E_UNSUPPORTED       = -11,  /* feature not available in this build */
-    LISA_E_INTERNAL          = -12   /* bug: please report */
+    LISA_E_INTERNAL          = -12,  /* bug: please report */
+    LISA_E_CANCELLED         = -13,  /* stopped by a progress callback */
+    LISA_E_TOO_LONG          = -14,  /* input does not fit the model's context window */
+    LISA_E_WRONG_MODEL_KIND  = -15   /* e.g. embedding with a generation model */
 } lisa_status;
 
 /* Human-readable description of a status code. Never NULL. */
@@ -401,6 +404,144 @@ LISA_API int lisa_collection_search_vector(lisa_collection_t* coll,
                                            const lisa_search_options_t* options,
                                            lisa_hit_t* hits, int64_t capacity,
                                            int64_t* out_count);
+
+/* ==== Models ========================================================== */
+/*
+ * Local models in GGUF format: generation (chat) models and embedding
+ * models. A model handle must be used by one thread at a time; loading
+ * the same file twice shares nothing.
+ */
+
+typedef struct lisa_model lisa_model_t;
+
+/* Progress in [0, 1]. Return non-zero to continue, 0 to cancel. */
+typedef int (*lisa_progress_fn)(void* user, float fraction);
+
+typedef struct lisa_model_options {
+    size_t           struct_size;
+    int32_t          gpu_layers;      /* -1: all layers on the GPU (default); 0: CPU only */
+    int64_t          context_tokens;  /* context window; 0: 4096 (capped at the model's limit) */
+    int32_t          threads;         /* 0: automatic */
+    lisa_progress_fn progress;        /* optional load progress */
+    void*            progress_user;
+} lisa_model_options_t;
+
+#define LISA_MODEL_OPTIONS_INIT { sizeof(lisa_model_options_t), -1, 0, 0, NULL, NULL }
+
+/*
+ * Load a GGUF model file. options may be NULL. Release with
+ * lisa_model_free. Note: on macOS the first load after install compiles
+ * GPU shaders, which can take tens of seconds; use `progress`.
+ */
+LISA_API int lisa_model_load(lisa_context_t* ctx, const char* path,
+                             const lisa_model_options_t* options, lisa_model_t** out);
+
+/* Release a model. NULL is ignored. */
+LISA_API void lisa_model_free(lisa_model_t* model);
+
+typedef struct lisa_model_info {
+    size_t      struct_size;
+    const char* name;            /* from the model file; owned by the handle */
+    const char* architecture;    /* e.g. "qwen3" */
+    const char* profile;         /* LISA profile in use, e.g. "qwen3-4b-q4_k_m", or "generic" */
+    int64_t     file_size;
+    int64_t     context_train;   /* context length the model was trained with */
+    int64_t     context_tokens;  /* context window in use */
+    int64_t     embedding_dim;   /* for embedding models; 0 otherwise */
+    int32_t     is_embedding;
+    int32_t     gpu;             /* 1 if layers run on the GPU */
+} lisa_model_info_t;
+
+#define LISA_MODEL_INFO_INIT { sizeof(lisa_model_info_t), NULL, NULL, NULL, 0, 0, 0, 0, 0, 0 }
+
+LISA_API int lisa_model_info(const lisa_model_t* model, lisa_model_info_t* info);
+
+/* --- Known models (verified files with licences) --- */
+
+typedef struct lisa_known_model {
+    const char* id;
+    const char* file_name;
+    int64_t     file_size;
+    const char* sha256;       /* lowercase hex */
+    const char* license;      /* SPDX identifier */
+    const char* source;       /* download location and revision */
+    int32_t     is_embedding;
+} lisa_known_model_t;
+
+/* Number of known models; lisa_known_model(i) for i in [0, count). */
+LISA_API int64_t lisa_known_model_count(void);
+LISA_API int     lisa_known_model(int64_t index, lisa_known_model_t* out);
+
+/*
+ * Hash a model file and compare it with the known models.
+ *   LISA_OK:             a known model; *match (if non-NULL) describes it.
+ *   LISA_E_UNSUPPORTED:  readable, but not a known model (it may still load).
+ *   LISA_E_NOT_FOUND:    no such file.
+ * sha256_hex (if non-NULL, 65 bytes) receives the file's SHA-256.
+ */
+LISA_API int lisa_model_verify(const char* path, lisa_known_model_t* match, char* sha256_hex);
+
+/* --- Generation --- */
+
+typedef struct lisa_message {
+    const char* role;     /* "system", "user", or "assistant" */
+    const char* content;
+} lisa_message_t;
+
+/*
+ * Receives generated text as it is produced, in pieces that always end on
+ * a UTF-8 character boundary. Return 0 to continue, non-zero to stop.
+ */
+typedef int (*lisa_token_fn)(void* user, const char* text, int64_t len);
+
+typedef struct lisa_generate_options {
+    size_t        struct_size;
+    int64_t       max_tokens;     /* default 512 */
+    float         temperature;    /* 0: deterministic (greedy); < 0: model default */
+    uint64_t      seed;           /* for temperature > 0 */
+    lisa_token_fn on_token;       /* optional streaming callback */
+    void*         on_token_user;
+} lisa_generate_options_t;
+
+#define LISA_GENERATE_OPTIONS_INIT \
+    { sizeof(lisa_generate_options_t), 512, -1.0f, 0, NULL, NULL }
+
+/*
+ * Chat: format messages with the model's chat template and generate the
+ * assistant's reply. *out_text (optional) receives the reply, allocated
+ * with the context allocator; release with lisa_free. *out_tokens
+ * (optional) receives the number of generated tokens.
+ */
+LISA_API int lisa_chat(lisa_model_t* model, const lisa_message_t* messages, int64_t count,
+                       const lisa_generate_options_t* options,
+                       char** out_text, int64_t* out_tokens);
+
+/* Continue raw prompt text (no chat template). Same outputs as lisa_chat. */
+LISA_API int lisa_generate(lisa_model_t* model, const char* prompt,
+                           const lisa_generate_options_t* options,
+                           char** out_text, int64_t* out_tokens);
+
+/* --- Embeddings --- */
+
+typedef enum lisa_embed_kind {
+    LISA_EMBED_DOCUMENT = 0,  /* text to be searched */
+    LISA_EMBED_QUERY    = 1   /* a question used to search */
+} lisa_embed_kind;
+
+/*
+ * Embed count texts into out (count * dim floats), L2-normalised. dim: 0
+ * for the model's native dimension, or smaller if the model supports
+ * truncated embeddings (else LISA_E_INVALID_ARGUMENT). Queries and
+ * documents may be embedded differently, as the model requires.
+ */
+LISA_API int lisa_embed(lisa_model_t* model, lisa_embed_kind kind,
+                        const char* const* texts, int64_t count,
+                        float* out, int64_t dim);
+
+/* ==== Memory returned by LISA ========================================= */
+
+/* Free memory LISA returned (e.g. generated text). NULL is ignored. */
+LISA_API void lisa_free(lisa_context_t* ctx, void* ptr);
 
 #ifdef __cplusplus
 }

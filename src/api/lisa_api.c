@@ -8,7 +8,7 @@
  * src/retrieval.
  */
 
-#include "lisa.h"
+#include "api_internal.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -17,10 +17,6 @@
 #include "../storage/store.h"
 
 #define MAX_TOP_K 10000
-
-/* A struct field is present if the caller's struct_size covers it. */
-#define HAS_FIELD(ptr, type, field) \
-    ((ptr)->struct_size >= offsetof(type, field) + sizeof((ptr)->field))
 
 /* ==== Version and status ============================================== */
 
@@ -46,6 +42,9 @@ const char* lisa_status_string(int status) {
     case LISA_E_DENIED:           return "access denied";
     case LISA_E_UNSUPPORTED:      return "not supported in this build";
     case LISA_E_INTERNAL:         return "internal error";
+    case LISA_E_CANCELLED:        return "cancelled";
+    case LISA_E_TOO_LONG:         return "input is too long for the model's context window";
+    case LISA_E_WRONG_MODEL_KIND: return "wrong kind of model for this operation";
     default:                      return "unknown status";
     }
 }
@@ -68,16 +67,6 @@ static int from_store(int rc) {
 
 /* ==== Context ========================================================= */
 
-struct lisa_context {
-    lisa_allocator_t        alloc;
-    int                     has_auth, has_filter, has_audit, has_crypto, has_routes;
-    lisa_auth_provider_t    auth;
-    lisa_retrieval_filter_t filter;
-    lisa_audit_sink_t       audit;
-    lisa_storage_crypto_t   crypto;
-    lisa_http_routes_t      routes;
-};
-
 static void* sys_alloc(void* user, size_t size) {
     (void)user;
     return malloc(size);
@@ -91,21 +80,6 @@ static void* sys_realloc(void* user, void* p, size_t size) {
 static void sys_free(void* user, void* p) {
     (void)user;
     free(p);
-}
-
-static void* ctx_alloc(const lisa_context_t* ctx, size_t size) {
-    return ctx->alloc.alloc(ctx->alloc.user, size ? size : 1);
-}
-
-static void ctx_free(const lisa_context_t* ctx, void* p) {
-    if (p) ctx->alloc.free(ctx->alloc.user, p);
-}
-
-static char* ctx_strdup(const lisa_context_t* ctx, const char* s) {
-    size_t n = strlen(s) + 1;
-    char* d = (char*)ctx_alloc(ctx, n);
-    if (d) memcpy(d, s, n);
-    return d;
 }
 
 /*
@@ -175,6 +149,10 @@ int lisa_context_create(const lisa_context_config_t* config, lisa_context_t** ou
     }
     *out = ctx;
     return LISA_OK;
+}
+
+void lisa_free(lisa_context_t* ctx, void* ptr) {
+    if (ctx != NULL) ctx_free(ctx, ptr);
 }
 
 void lisa_context_destroy(lisa_context_t* ctx) {

@@ -49,3 +49,7 @@ tests/test_storage_mutation_asan
 
 # ASan build for API tests
 build/lisa_asan
+
+# Model files (downloaded locally, never committed)
+/models/
+*.gguf

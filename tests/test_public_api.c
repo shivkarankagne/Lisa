@@ -70,7 +70,7 @@ static void test_version(void) {
 }
 
 static void test_status_strings(void) {
-    for (int s = LISA_OK; s >= LISA_E_INTERNAL; s--) {
+    for (int s = LISA_OK; s >= LISA_E_WRONG_MODEL_KIND; s--) {
         TEST_ASSERT_NOT_NULL(lisa_status_string(s));
         TEST_ASSERT_TRUE(strcmp(lisa_status_string(s), "unknown status") != 0);
     }
