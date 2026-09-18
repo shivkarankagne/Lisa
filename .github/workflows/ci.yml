@@ -1,0 +1,57 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# CI for the working product (plan W1): build and run every test on
+# ARM64 macOS, in the Release (-O2) and sanitizer (ASan + UBSan) builds.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  macos-arm64:
+    name: macOS ARM64 (${{ matrix.config.name }})
+    runs-on: macos-15
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - { name: release,  args: "-DCMAKE_BUILD_TYPE=Release" }
+          - { name: sanitize, args: "-DCMAKE_BUILD_TYPE=Debug -DLISA_SANITIZE=ON" }
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          uname -m
+          clang --version
+          cmake --version
+
+      - name: Configure
+        run: cmake -S . -B build ${{ matrix.config.args }}
+
+      - name: Build
+        run: cmake --build build -j "$(sysctl -n hw.ncpu)"
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure --timeout 900
+
+      - name: Single-executable check
+        if: matrix.config.name == 'release'
+        run: |
+          otool -L build/lisa
+          # Only system libraries and frameworks may appear.
+          if otool -L build/lisa | tail -n +2 | grep -vE '^\s+(/usr/lib/|/System/Library/)'; then
+            echo "error: build/lisa links a non-system library"
+            exit 1
+          fi
