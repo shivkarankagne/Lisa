@@ -53,6 +53,21 @@ if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64|ARM64)$")
         "Detected: ${CMAKE_SYSTEM_PROCESSOR}")
 endif()
 
+# ---- third-party (see third_party/README.md) ---------------------------
+
+add_library(lisa_sqlite STATIC third_party/sqlite/sqlite3.c)
+target_include_directories(lisa_sqlite PUBLIC third_party/sqlite)
+target_compile_definitions(lisa_sqlite PUBLIC
+    SQLITE_ENABLE_FTS5
+    SQLITE_THREADSAFE=1
+    SQLITE_DQS=0
+    SQLITE_DEFAULT_MEMSTATUS=0
+    SQLITE_OMIT_LOAD_EXTENSION
+    SQLITE_OMIT_DEPRECATED
+    SQLITE_DEFAULT_WAL_SYNCHRONOUS=1
+)
+target_compile_options(lisa_sqlite PRIVATE -w)
+
 # ---- core library ------------------------------------------------------
 
 add_library(lisa_core STATIC
@@ -82,6 +97,10 @@ target_link_libraries(lisa PRIVATE lisa_core)
 if(LISA_BUILD_TESTS)
     enable_testing()
 
+    add_library(lisa_unity STATIC third_party/unity/unity.c)
+    target_include_directories(lisa_unity PUBLIC third_party/unity)
+    target_compile_options(lisa_unity PRIVATE -w)
+
     function(lisa_c_test name)
         add_executable(${name} tests/${name}.c ${ARGN})
         target_link_libraries(${name} PRIVATE lisa_core)
@@ -98,6 +117,10 @@ if(LISA_BUILD_TESTS)
     add_executable(test_platform tests/test_platform.c)
     target_link_libraries(test_platform PRIVATE lisa_core)
     add_test(NAME test_platform COMMAND test_platform ${CMAKE_BINARY_DIR}/scratch)
+
+    add_executable(test_sqlite tests/test_sqlite.c)
+    target_link_libraries(test_sqlite PRIVATE lisa_core lisa_sqlite lisa_unity)
+    add_test(NAME test_sqlite COMMAND test_sqlite ${CMAKE_BINARY_DIR}/scratch)
     lisa_c_test(test_search)
     add_test(NAME test_search_scalar COMMAND test_search)
     set_tests_properties(test_search_scalar PROPERTIES ENVIRONMENT "LISA_KERNEL=scalar")
