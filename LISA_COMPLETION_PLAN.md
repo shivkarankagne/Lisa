@@ -259,7 +259,7 @@ builds now exist. Update it in the next report.
 
 Fix before building on top of the affected code. Ordered by severity.
 
-### D1 — Assembly kernel ABI violation — HIGH
+### D1 — Assembly kernel ABI violation — HIGH — FIXED (W1)
 `src/kernels/arm64/lisa_ultra_mac.s` receives `int n` and `int dim` in
 `w2` / `w3` but uses the full 64-bit `x2` / `x3` (`cmp x9, x2`,
 `lsl x16, x3, #2`, `mul x13, x9, x3`). AAPCS64 leaves the upper 32 bits of
@@ -268,7 +268,7 @@ Fix before building on top of the affected code. Ordered by severity.
 **Fix:** `sxtw x2, w2` and `sxtw x3, w3` at kernel entry, or change the
 kernel contract to 64-bit sizes. Add a regression test.
 
-### D2 — Whole dataset copied on every query — HIGH (performance)
+### D2 — Whole dataset copied on every query — HIGH (performance) — FIXED (W1)
 `lisa_search_exact_asm` in `src/kernels/arm64/lisa_asm_wrapper.c` copies
 all `n * dim` floats into a padded buffer on every search (≈30 MB per query
 at 10k × 768). The recorded 1.644 ms includes this copy.
@@ -276,7 +276,7 @@ at 10k × 768). The recorded 1.644 ms includes this copy.
 **Fix:** handle the `dim % 4` tail inside the kernel, or store vectors
 pre-padded. Remove the per-query copy. Re-benchmark.
 
-### D3 — `-O0` product build — HIGH
+### D3 — `-O0` product build — HIGH — FIXED (W1)
 The Makefile builds at `-O0` because `-O2` "miscompiled comparison logic in
 test code". Undefined behaviour in the test code is the likely cause.
 
@@ -298,7 +298,7 @@ move the product build to `-O2`. All benchmarks use product flags.
 ### D7 — HTTP parses headers with a single `recv` — LOW
 **Fix:** resolved by W9 (CivetWeb replaces `http.c`).
 
-### D8 — Build and test hygiene — LOW
+### D8 — Build and test hygiene — LOW — FIXED (W1)
 - `make test` runs prebuilt test binaries; it does not rebuild them.
 - `test_storage_mutation` and `tests/test_api.sh` are not in `make test`.
 - `src/kernels/arm64/lisa.s` is an empty tracked file.
