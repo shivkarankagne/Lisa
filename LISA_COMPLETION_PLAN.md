@@ -449,6 +449,9 @@ engineer. Estimates, not commitments.
 - **Initial targets (confirm by measurement):** Apple Silicon M1 or newer,
   8 GB RAM; first answer token ≤ 5 s on 8 GB; collections up to 5,000
   documents. Measured numbers recorded in a report.
+  *Measured (report 005, M2):* prompt processing ~240 tokens/s, so first
+  token ≈ prompt tokens / 240 s: 8.6 s at 2,000 tokens, ≤ 5 s up to about
+  1,100 tokens. Peak memory with both models loaded: 4.2 GB.
 
 **W5 — Documents**
 - txt, md, pdf. Each format is one extractor registered by file type.

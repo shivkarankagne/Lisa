@@ -36,8 +36,8 @@ W0 (parallel, anytime)
 W1 → W2 → W3 → W4, W5 (parallel) → W6, W7 → W8 → W9 → W10, W11 → W12
 ```
 
-W1–W3 are done (reports `LISA_REPORT_AND_UPDATE_002.md`–`_004.md`);
-next is **W4**. Check the plan's acceptance criteria for the package you
+W1–W4 are done (reports `LISA_REPORT_AND_UPDATE_002.md`–`_005.md`);
+next is **W5**. Check the plan's acceptance criteria for the package you
 are on; a package is not done until every criterion is met.
 
 ## Non-negotiable rules
@@ -210,7 +210,11 @@ After changing code:
 - Every change: all tests pass, including ASan/UBSan variants.
 - New behaviour needs tests. Bug fixes need a regression test.
 - Test data (`*.bin`, query files) is generated locally and is gitignored.
-  Model files (`*.gguf`) are never committed.
+  Model files (`*.gguf`) are never committed. Model tests need the files
+  in `models/` (see `docs/models.md`); without them they are reported as
+  ignored, not passed.
+- Programs must free every loaded model before exiting: llama.cpp aborts
+  at exit otherwise.
 
 ## Known defects (plan §4)
 
@@ -235,7 +239,9 @@ Current:
     src/cli/            CLI entry point
     include/lisa.h      public API (W3)
     src/api/            lisa.h implementation (lisa_api.c); hand-written HTTP server (replaced in W9)
+    src/models/         model runtime over llama.cpp (only code that includes llama.h)
     third_party/        sqlite, llama.cpp, unity (see third_party/README.md)
+    models/             downloaded model files (gitignored; see docs/models.md)
     docs/formats/       on-disk format specs
     tests/  benchmark/  .github/workflows/
 
