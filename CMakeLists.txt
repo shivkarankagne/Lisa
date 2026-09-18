@@ -56,6 +56,7 @@ endif()
 # ---- core library ------------------------------------------------------
 
 add_library(lisa_core STATIC
+    src/platform/platform_posix.c
     src/kernels/registry.c
     src/kernels/kernels_scalar.c
     src/kernels/arm64/l2_neon.c
@@ -94,6 +95,9 @@ if(LISA_BUILD_TESTS)
     lisa_c_test(test_storage_mutation)
     lisa_c_test(test_kernel_abi tests/kernel_abi_probe.s)
     lisa_c_test(test_kernels)
+    add_executable(test_platform tests/test_platform.c)
+    target_link_libraries(test_platform PRIVATE lisa_core)
+    add_test(NAME test_platform COMMAND test_platform ${CMAKE_BINARY_DIR}/scratch)
     lisa_c_test(test_search)
     add_test(NAME test_search_scalar COMMAND test_search)
     set_tests_properties(test_search_scalar PROPERTIES ENVIRONMENT "LISA_KERNEL=scalar")

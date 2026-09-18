@@ -4,10 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
-#include <sys/stat.h>
-#include <sys/types.h>
-#include <unistd.h>
-#include <errno.h>
+
+#include "../platform/platform.h"
 
 #define LISA_STORAGE_MAX_HANDLES 64
 #define LISA_STORAGE_HEADER_V1 16
@@ -51,22 +49,11 @@ static int read_u32_le(FILE* f, uint32_t* out) {
 /* ---- filesystem helpers ---- */
 
 static int dir_exists(const char* path) {
-    struct stat st;
-    if (stat(path, &st) != 0) return 0;
-    return S_ISDIR(st.st_mode) ? 1 : 0;
+    return lisa_path_is_dir(path);
 }
 
 static char* path_join(const char* dir, const char* name) {
-    size_t dl = strlen(dir);
-    size_t nl = strlen(name);
-    size_t need = dl + 1 + nl + 1;
-    char* p = (char*)malloc(need);
-    if (!p) return NULL;
-    memcpy(p, dir, dl);
-    p[dl] = '/';
-    memcpy(p + dl + 1, name, nl);
-    p[dl + 1 + nl] = '\0';
-    return p;
+    return lisa_path_join(dir, name);
 }
 
 /* ---- handle helpers ---- */
@@ -140,7 +127,7 @@ int storage_create(const char* path, int n, int dim, const float* vectors) {
     if (strlen(path) == 0) return -1;
     if (dir_exists(path)) return -2;
 
-    if (mkdir(path, 0755) != 0) return -2;
+    if (lisa_mkdir(path) != LISA_PLAT_OK) return -2;
 
     int capacity = n;
     int rc = write_header_v2(path, n, dim, capacity);
