@@ -2,6 +2,7 @@
 #define LISA_RETRIEVAL_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 /*
  * LISA Retrieval API — stable public interface
@@ -63,6 +64,31 @@ int lisa_search_exact(
     int n,
     int dim,
     int k,
+    lisa_result_t* result
+);
+
+/*
+ * Exact top-k search using the fastest kernel available on this machine
+ * (see src/kernels/kernels.h). This is the search used by the product;
+ * lisa_search_exact above remains the scalar reference it is tested
+ * against.
+ *
+ * Same contract as lisa_search_exact, with 64-bit sizes. Results agree
+ * with lisa_search_exact up to floating-point rounding (different
+ * summation order). The dataset is never copied; memory use is O(k).
+ *
+ * Errors:
+ *   -1: query, vectors, or result is NULL
+ *   -2: n <= 0, dim <= 0, k <= 0, or n > INT32_MAX (indices are int)
+ *   -3: result->indices or result->dists is NULL
+ *   -4: allocation failure (only when k > 256)
+ */
+int lisa_search(
+    const float* query,
+    const float* vectors,
+    int64_t n,
+    int64_t dim,
+    int64_t k,
     lisa_result_t* result
 );
 

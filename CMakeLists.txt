@@ -56,7 +56,11 @@ endif()
 # ---- core library ------------------------------------------------------
 
 add_library(lisa_core STATIC
+    src/kernels/registry.c
+    src/kernels/kernels_scalar.c
+    src/kernels/arm64/l2_neon.c
     src/retrieval/retrieval_scalar.c
+    src/retrieval/retrieval_search.c
     src/storage/storage.c
     src/kernels/arm64/lisa_asm_wrapper.c
     src/kernels/arm64/lisa_ultra_mac.s
@@ -89,6 +93,10 @@ if(LISA_BUILD_TESTS)
     lisa_c_test(test_storage)
     lisa_c_test(test_storage_mutation)
     lisa_c_test(test_kernel_abi tests/kernel_abi_probe.s)
+    lisa_c_test(test_kernels)
+    lisa_c_test(test_search)
+    add_test(NAME test_search_scalar COMMAND test_search)
+    set_tests_properties(test_search_scalar PROPERTIES ENVIRONMENT "LISA_KERNEL=scalar")
 
     add_executable(fuzz_retrieval_asm tests/fuzz_retrieval_asm.c)
     target_link_libraries(fuzz_retrieval_asm PRIVATE lisa_core)

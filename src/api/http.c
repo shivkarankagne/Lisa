@@ -15,8 +15,6 @@
 #include "../retrieval/retrieval.h"
 #include "../storage/storage.h"
 
-#include "../kernels/arm64/lisa_asm.h"
-
 #define LISA_HTTP_MAX_BODY (4 * 1024 * 1024)   /* 4 MB cap */
 #define LISA_HTTP_BUF      8192
 
@@ -295,7 +293,7 @@ static int handle_search(int fd, const http_request_t* req,
         .n_returned = 0
     };
 
-    int rc = lisa_search_exact_asm(query, vectors, n, dim, k_eff, &r);
+    int rc = lisa_search(query, vectors, n, dim, k_eff, &r);
     if (rc != 0) {
         free(indices); free(dists);
         storage_close(handle);

@@ -34,8 +34,6 @@
  *   6  storage error
  */
 
-#include "../kernels/arm64/lisa_asm.h"
-
 static void usage(const char* prog) {
     fprintf(stderr,
         "usage: %s --index <file> --dim <int> --query <file> [--topk <int>]\n"
@@ -268,7 +266,7 @@ int main(int argc, char** argv) {
         .n_returned = 0
     };
 
-    int rc = lisa_search_exact_asm(query, vectors, n, dim, k_eff, &result);
+    int rc = lisa_search(query, vectors, n, dim, k_eff, &result);
     if (rc != 0) {
         fprintf(stderr, "error: retrieval engine returned %d\n", rc);
         if (owns_vectors) free(vectors);
