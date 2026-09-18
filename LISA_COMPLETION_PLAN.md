@@ -283,7 +283,7 @@ test code". Undefined behaviour in the test code is the likely cause.
 **Fix:** build tests with `-O2 -fsanitize=undefined,address`, fix any UB,
 move the product build to `-O2`. All benchmarks use product flags.
 
-### D4 — Storage delete shifts indices — MEDIUM
+### D4 — Storage delete shifts indices — MEDIUM — FIXED (W2, storage v2)
 `storage_delete` renumbers every later vector. Stored references break.
 **Fix:** stable IDs (W2).
 

@@ -36,8 +36,9 @@ W0 (parallel, anytime)
 W1 → W2 → W3 → W4, W5 (parallel) → W6, W7 → W8 → W9 → W10, W11 → W12
 ```
 
-W1 is done (see `LISA_REPORT_AND_UPDATE_002.md`); next is **W2**. Check
-the plan's acceptance criteria for the package you are on; a package is not done until every criterion is met.
+W1 and W2 are done (reports `LISA_REPORT_AND_UPDATE_002.md`, `_003.md`);
+next is **W3**. Check the plan's acceptance criteria for the package you
+are on; a package is not done until every criterion is met.
 
 ## Non-negotiable rules
 
@@ -218,7 +219,7 @@ After changing code:
 | D1 | Assembly kernel ABI (32-bit args in x2/x3; clobbered callee-saved d8) | Fixed in W1 (`e721f62`) |
 | D2 | Asm wrapper copied the whole dataset per query | Fixed in W1 (`7ed0041`): product uses `lisa_search`; the asm path is test-only |
 | D3 | `-O0` build | Fixed in W1 (`6f49747`): cause was D1, not the compiler |
-| D4 | `storage_delete` renumbers indices | Open — W2 |
+| D4 | `storage_delete` renumbers indices | Fixed by storage v2 in W2 (`f1de8e0`); v1 module kept for the CLI/HTTP until W9 |
 | D5–D7 | `src/api/http.c`: re-reads collection per request, arbitrary paths, single `recv`; direct socket calls outside `src/platform/` | Open — W9 (replaced by CivetWeb) |
 | D8 | Build/test hygiene | Fixed in W1 (`6f49747`, `c5a95cd`, `d3f5edc`) |
 
@@ -230,10 +231,11 @@ Current:
     src/kernels/        kernel registry, scalar + NEON intrinsics kernels
     src/kernels/arm64/  legacy assembly kernel + wrapper (test-only path)
     src/retrieval/      scalar reference + lisa_search
-    src/storage/        storage v1.1 (replaced in W2)
+    src/storage/        storage v2 (store.h); v1.1 (storage.h) until W9
     src/cli/            CLI entry point
     src/api/            hand-written HTTP server (replaced in W9)
     third_party/        sqlite, llama.cpp, unity (see third_party/README.md)
+    docs/formats/       on-disk format specs
     tests/  benchmark/  .github/workflows/
 
 Target for 1.0 (create directories as their package starts):
