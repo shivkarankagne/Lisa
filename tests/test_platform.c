@@ -83,6 +83,14 @@ int main(int argc, char** argv) {
     check(lisa_file_size(dir) == LISA_PLAT_EINVAL, "file_size dir -> EINVAL");
     check(lisa_file_sync(NULL) == LISA_PLAT_EINVAL, "file_sync(NULL) -> EINVAL");
 
+    /* 64-bit seek */
+    FILE* sf = fopen(a, "r+b");
+    char c = 0;
+    check(sf && lisa_file_seek(sf, 4) == LISA_PLAT_OK && fread(&c, 1, 1, sf) == 1 && c == 'o',
+          "file_seek to offset");
+    check(lisa_file_seek(sf, -1) == LISA_PLAT_EINVAL, "file_seek negative -> EINVAL");
+    if (sf) fclose(sf);
+
     /* rename_replace */
     check(write_file(b, "old contents") == 0, "write second file");
     check(lisa_rename_replace(a, b) == LISA_PLAT_OK, "rename_replace over existing");

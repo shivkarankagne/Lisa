@@ -89,6 +89,12 @@ int lisa_file_sync(FILE* f) {
     return LISA_PLAT_OK;
 }
 
+int lisa_file_seek(FILE* f, int64_t offset) {
+    if (f == NULL || offset < 0) return LISA_PLAT_EINVAL;
+    if (fseeko(f, (off_t)offset, SEEK_SET) != 0) return from_errno(errno);
+    return LISA_PLAT_OK;
+}
+
 int lisa_rename_replace(const char* from, const char* to) {
     if (from == NULL || to == NULL) return LISA_PLAT_EINVAL;
     /* POSIX rename() atomically replaces an existing target. */

@@ -63,6 +63,12 @@ int64_t lisa_file_size(const char* path);
 int lisa_file_sync(FILE* f);
 
 /*
+ * Set the position of a stdio stream to an absolute 64-bit byte offset.
+ * (fseek takes a long, which is 32-bit on some platforms.)
+ */
+int lisa_file_seek(FILE* f, int64_t offset);
+
+/*
  * Atomically replace `to` with `from` (both on the same filesystem).
  * After a crash, `to` is either the old or the new file, never partial.
  */
