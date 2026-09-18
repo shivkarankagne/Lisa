@@ -17,8 +17,18 @@ reason and is documented below.
 | `fuzz_compare.py` | Compare scalar and asm blocks with stated tolerance |
 | `fuzz_run.sh` | Run fuzz_gen across many seeds, compare with fuzz_compare.py |
 | `fuzz_debug.c` | Debug helper, not part of the standard test run |
+| `test_kernel_abi.c` + `kernel_abi_probe.s` | AAPCS64 conformance of the assembly kernel (callee-saved d8-d15, 32-bit int arguments) |
+| `gen_test_data.c` | Deterministic index + query files for the CLI tests |
 
 ## How to build and run
+
+All tests are built and run by CMake from the repository root:
+
+    cmake -S . -B build && cmake --build build
+    ctest --test-dir build --output-on-failure
+
+The manual `gcc` commands below remain valid for building a single test
+by hand.
 
 ### Scalar vs naive sort
 

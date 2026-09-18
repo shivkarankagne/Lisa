@@ -3,9 +3,9 @@
 # Note: set -e is NOT used, because we deliberately run commands that
 # return non-zero exit codes and check them.
 
-BIN=~/lisa_assembly/build/lisa
-IDX=~/lisa_assembly/vectors_768.bin
-QRY=~/lisa_assembly/query_768.txt
+BIN=${LISA_BIN:-~/lisa_assembly/build/lisa}
+IDX=${LISA_TEST_INDEX:-~/lisa_assembly/vectors_768.bin}
+QRY=${LISA_TEST_QUERY:-~/lisa_assembly/query_768.txt}
 DIM=768
 TOPK=5
 
@@ -64,7 +64,7 @@ fi
 
 # Prepare a storage collection for the --collection tests.
 # We build it from the existing index file using a tiny helper.
-BUILD_COLL=~/lisa_assembly/tests/build_collection
+BUILD_COLL=${LISA_BUILD_COLLECTION:-~/lisa_assembly/tests/build_collection}
 if [ ! -x "$BUILD_COLL" ]; then
     echo "  SKIP: collection tests (build_collection helper not present)"
 else

@@ -2,7 +2,7 @@
 # test_api.sh — end-to-end test of the LISA HTTP API
 # Note: set -e is NOT used, because we expect non-zero exit codes.
 
-BIN=~/lisa_assembly/build/lisa
+BIN=${LISA_BIN:-~/lisa_assembly/build/lisa}
 PORT=18080
 COLL=/tmp/lisa_api_test_coll
 QRY=/tmp/lisa_api_test_query.bin

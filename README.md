@@ -25,19 +25,24 @@ Inference, Context, RAG/Agents, Security) are not started.
 
 ## Build
 
-    make
+Requires CMake 3.20+ and Apple clang on an ARM64 Mac.
+
+    cmake -S . -B build
+    cmake --build build
 
 Produces one native executable:
 
     build/lisa
 
-Clean:
+Run the test suite (builds every test from source):
 
-    make clean
+    ctest --test-dir build --output-on-failure
 
-Run the test suite:
+Sanitizer build (ASan + UBSan):
 
-    make test
+    cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug -DLISA_SANITIZE=ON
+    cmake --build build-asan
+    ctest --test-dir build-asan --output-on-failure
 
 ---
 

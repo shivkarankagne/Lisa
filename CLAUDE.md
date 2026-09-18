@@ -198,17 +198,13 @@ After changing code:
 
 ## Build and test
 
-Current (until W1 replaces it):
-
-    make            # builds build/lisa
-    make test       # runs tests — NOTE: runs prebuilt test binaries;
-                    # rebuild them per tests/README.md after changes
-
-After W1 (CMake):
-
-    cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+    cmake -S . -B build                  # Release, -O2
     cmake --build build
     ctest --test-dir build --output-on-failure
+
+    cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug -DLISA_SANITIZE=ON
+    cmake --build build-asan
+    ctest --test-dir build-asan --output-on-failure
 
 - Every change: all tests pass, including ASan/UBSan variants.
 - New behaviour needs tests. Bug fixes need a regression test.

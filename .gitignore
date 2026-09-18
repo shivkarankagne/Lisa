@@ -3,6 +3,7 @@
 *.bin
 *.dSYM/
 build/
+build-*/
 
 # Test binaries
 tests/test_retrieval
