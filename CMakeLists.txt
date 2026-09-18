@@ -13,11 +13,12 @@
 #   ctest --test-dir build-asan --output-on-failure
 
 cmake_minimum_required(VERSION 3.20)
-project(lisa VERSION 0.1.0 LANGUAGES C ASM)
+project(lisa VERSION 0.1.0 LANGUAGES C CXX ASM)
 
 option(LISA_SANITIZE         "Build with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
 option(LISA_BUILD_TESTS      "Build tests"      ON)
 option(LISA_BUILD_BENCHMARKS "Build benchmarks" OFF)
+option(LISA_BUILD_LLAMA      "Build vendored llama.cpp (model runtime, W4)" ON)
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
@@ -31,11 +32,7 @@ set(CMAKE_C_EXTENSIONS OFF)
 set(CMAKE_C_FLAGS_RELEASE "-O2 -g")
 set(CMAKE_C_FLAGS_DEBUG   "-O0 -g")
 
-add_compile_options(
-    $<$<COMPILE_LANGUAGE:C>:-Wall>
-    $<$<COMPILE_LANGUAGE:C>:-Wextra>
-)
-
+# Sanitizers apply to everything, including third-party code.
 if(LISA_SANITIZE)
     add_compile_options(
         -fsanitize=address,undefined
@@ -44,6 +41,27 @@ if(LISA_SANITIZE)
     )
     add_link_options(-fsanitize=address,undefined)
 endif()
+
+# ---- llama.cpp (third_party/llama.cpp/INTAKE.md) ------------------------
+# Added before LISA's warning flags, which must not apply to it.
+
+if(LISA_BUILD_LLAMA)
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    foreach(opt LLAMA_BUILD_COMMON LLAMA_BUILD_TESTS LLAMA_BUILD_TOOLS
+                LLAMA_BUILD_EXAMPLES LLAMA_BUILD_SERVER LLAMA_BUILD_APP
+                LLAMA_BUILD_UI GGML_NATIVE GGML_OPENMP GGML_CCACHE)
+        set(${opt} OFF CACHE BOOL "" FORCE)
+    endforeach()
+    set(GGML_METAL               ON CACHE BOOL "" FORCE)
+    set(GGML_METAL_EMBED_LIBRARY ON CACHE BOOL "" FORCE)
+    add_subdirectory(third_party/llama.cpp EXCLUDE_FROM_ALL)
+endif()
+
+# LISA's own code: warnings on.
+add_compile_options(
+    $<$<COMPILE_LANGUAGE:C>:-Wall>
+    $<$<COMPILE_LANGUAGE:C>:-Wextra>
+)
 
 # ---- platform / architecture -------------------------------------------
 
@@ -121,6 +139,12 @@ if(LISA_BUILD_TESTS)
     add_executable(test_sqlite tests/test_sqlite.c)
     target_link_libraries(test_sqlite PRIVATE lisa_core lisa_sqlite lisa_unity)
     add_test(NAME test_sqlite COMMAND test_sqlite ${CMAKE_BINARY_DIR}/scratch)
+
+    if(LISA_BUILD_LLAMA)
+        add_executable(test_llama_link tests/test_llama_link.c)
+        target_link_libraries(test_llama_link PRIVATE llama lisa_unity)
+        add_test(NAME test_llama_link COMMAND test_llama_link)
+    endif()
     lisa_c_test(test_search)
     add_test(NAME test_search_scalar COMMAND test_search)
     set_tests_properties(test_search_scalar PROPERTIES ENVIRONMENT "LISA_KERNEL=scalar")
