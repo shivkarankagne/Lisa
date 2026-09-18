@@ -484,6 +484,8 @@ engineer. Estimates, not commitments.
 - The ask API takes a list of messages (one message in 1.0), so
   follow-up chat can be added later without an API change.
 - Tokens stream to CLI, HTTP, and GUI.
+- Default prompt budget keeps first-token time ≤ 5 s on the reference
+  machine (about 1,100 prompt tokens on an M2, report 005); configurable.
 
 **W9 — Interfaces**
 
