@@ -408,9 +408,13 @@ engineer. Estimates, not commitments.
 - Kernels are called only through the registry.
 
 **W2 — Storage v2**
-- Collection directory: `vectors.lisa` (mmap'd via the platform layer,
-  64-byte aligned rows, little-endian, versioned header) + `meta.sqlite`
-  (SQLite, WAL mode).
+- Collection directory: `vectors.<gen>.lisa` (mmap'd via the platform
+  layer, little-endian, versioned 64-byte header, packed rows) +
+  `meta.sqlite` (SQLite, WAL mode). Spec: `docs/formats/collection-v2.md`.
+  *As built:* the generation number in the file name makes compaction an
+  atomic switch; rows are packed (64-byte aligned when `dim % 16 == 0`)
+  because NEON loads need no alignment and packing avoids a stride
+  parameter in every kernel.
 - Stable `uint64` IDs. Delete never renumbers; tombstones + compaction.
 - Metadata per chunk, at least: `doc_id`, `chunk_id`, `source_path`,
   `offset`, `length`, `text`, `content_hash`.
@@ -420,7 +424,8 @@ engineer. Estimates, not commitments.
 - Crash at any point leaves the collection at the last committed state
   (kill-during-write test).
 - One writer, many readers. A second writer waits or fails cleanly.
-- v1 / v1.1 collections migrate with one command.
+- v1 / v1.1 collections migrate with one call (`lisa_store_migrate_v1`);
+  the `lisa migrate` CLI command is added with the other commands in W9.
 
 **W3 — Public API**
 - `include/lisa.h` is the only public header. Opaque handles. Ownership
@@ -486,6 +491,7 @@ CLI:
     lisa serve   --data <dir> [--port <port>]
     lisa gui     --data <dir>
     lisa model   [--set <path>]
+    lisa migrate --from <v1-dir> --to <dir>
     lisa --version
 
 HTTP (JSON, versioned):

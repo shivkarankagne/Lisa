@@ -96,11 +96,12 @@ add_library(lisa_core STATIC
     src/retrieval/retrieval_scalar.c
     src/retrieval/retrieval_search.c
     src/storage/storage.c
+    src/storage/store.c
     src/kernels/arm64/lisa_asm_wrapper.c
     src/kernels/arm64/lisa_ultra_mac.s
 )
 target_include_directories(lisa_core PUBLIC src)
-target_link_libraries(lisa_core PUBLIC m)
+target_link_libraries(lisa_core PUBLIC lisa_sqlite m)
 
 # ---- executable --------------------------------------------------------
 
@@ -135,6 +136,13 @@ if(LISA_BUILD_TESTS)
     add_executable(test_platform tests/test_platform.c)
     target_link_libraries(test_platform PRIVATE lisa_core)
     add_test(NAME test_platform COMMAND test_platform ${CMAKE_BINARY_DIR}/scratch)
+
+    add_executable(test_store tests/test_store.c)
+    target_link_libraries(test_store PRIVATE lisa_core lisa_unity)
+    add_test(NAME test_store COMMAND test_store ${CMAKE_BINARY_DIR}/scratch)
+    add_executable(test_store_crash tests/test_store_crash.c)
+    target_link_libraries(test_store_crash PRIVATE lisa_core)
+    add_test(NAME test_store_crash COMMAND test_store_crash ${CMAKE_BINARY_DIR}/scratch 40)
 
     add_executable(test_sqlite tests/test_sqlite.c)
     target_link_libraries(test_sqlite PRIVATE lisa_core lisa_sqlite lisa_unity)
