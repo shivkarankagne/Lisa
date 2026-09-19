@@ -411,6 +411,19 @@ static struct llama_sampler* make_sampler(const lm_model_t* m, const lm_gen_para
     return s;
 }
 
+int lm_count_tokens(const lm_model_t* m, const char* text, int parse_special, int64_t* out) {
+    if (out) *out = 0;
+    if (m == NULL || text == NULL || out == NULL) return LM_EINVAL;
+    if (text[0] == '\0') return LM_OK;
+    llama_token* toks = NULL;
+    int32_t n = 0;
+    int rc = tokenize(m, text, 0, parse_special ? 1 : 0, &toks, &n);
+    if (rc != LM_OK) return rc;
+    free(toks);
+    *out = n;
+    return LM_OK;
+}
+
 int lm_generate(lm_model_t* m, const char* prompt, const lm_gen_params_t* p,
                 char** out_text, int64_t* out_tokens) {
     if (out_text) *out_text = NULL;

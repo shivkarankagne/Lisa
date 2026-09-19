@@ -131,6 +131,13 @@ int lm_format_chat(lm_model_t* m, const lm_message_t* msgs, int64_t n,
 int lm_generate(lm_model_t* m, const char* prompt, const lm_gen_params_t* params,
                 char** out_text, int64_t* out_tokens);
 
+/*
+ * Number of tokens text becomes. parse_special: 1 to count special-token
+ * markup (e.g. a formatted chat prompt) as lm_generate reads it, 0 to
+ * treat it as plain text. No BOS is added.
+ */
+int lm_count_tokens(const lm_model_t* m, const char* text, int parse_special, int64_t* out);
+
 /* ---- embeddings ------------------------------------------------------- */
 
 #define LM_EMBED_DOCUMENT 0
