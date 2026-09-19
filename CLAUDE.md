@@ -38,8 +38,8 @@ W0 (parallel, anytime)
 W1 → W2 → W3 → W4, W5 (parallel) → W6, W7 → W8 → W9 → W10, W11 → W12
 ```
 
-W1–W5 are done (reports `LISA_REPORT_AND_UPDATE_002.md`–`_006.md`);
-next is **W6**. Check the plan's acceptance criteria for the package you
+W1–W6 are done (reports `LISA_REPORT_AND_UPDATE_002.md`–`_007.md`);
+next is **W7**. Check the plan's acceptance criteria for the package you
 are on; a package is not done until every criterion is met.
 
 ## Non-negotiable rules
@@ -246,6 +246,7 @@ Current:
     src/api/            lisa.h implementation (lisa_api.c); hand-written HTTP server (replaced in W9)
     src/models/         model runtime over llama.cpp (only code that includes llama.h)
     src/documents/      extraction (txt, md, pdf), normalisation, chunker
+    src/ingest/         folder sync (skip unchanged, atomic replace, removals)
     scripts/            fetch_pdfium.sh (normal), build_pdfium.sh (upgrades; needs Xcode)
     third_party/        sqlite, llama.cpp, unity (see third_party/README.md)
     models/             downloaded model files (gitignored; see docs/models.md)
