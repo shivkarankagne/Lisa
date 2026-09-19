@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/* SPDX-License-Identifier: BUSL-1.1 */
 /*
  * Documents: extractor registry, text normalisation, plain-text extractor.
  */

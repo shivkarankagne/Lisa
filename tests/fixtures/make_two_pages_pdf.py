@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: BUSL-1.1
 """Generate tests/fixtures/two_pages.pdf: a minimal, valid two-page PDF with
 a text layer (Helvetica) and a Title in the document information
 dictionary. Run from the repository root; the output is committed."""

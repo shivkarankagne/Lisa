@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/* SPDX-License-Identifier: BUSL-1.1 */
 /*
  * Kernel registry: selects one kernel table per process.
  */

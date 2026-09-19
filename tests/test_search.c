@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/* SPDX-License-Identifier: BUSL-1.1 */
 /*
  * test_search — lisa_search (production path) vs lisa_search_exact
  * (scalar reference).

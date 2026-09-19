@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/* SPDX-License-Identifier: BUSL-1.1 */
 /*
  * test_sqlite — the vendored SQLite build has the features storage v2
  * relies on: FTS5 with BM25 ranking, WAL mode, thread safety, and no

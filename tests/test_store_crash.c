@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/* SPDX-License-Identifier: BUSL-1.1 */
 /*
  * test_store_crash — storage v2 crash safety (W2 acceptance).
  *

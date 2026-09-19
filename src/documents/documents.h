@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/* SPDX-License-Identifier: BUSL-1.1 */
 #ifndef LISA_DOCUMENTS_H
 #define LISA_DOCUMENTS_H
 

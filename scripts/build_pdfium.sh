@@ -1,5 +1,5 @@
 #!/bin/bash
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: BUSL-1.1
 #
 # Build a static PDFium library for LISA (plan W5; third_party/pdfium/INTAKE.md).
 #

@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/* SPDX-License-Identifier: BUSL-1.1 */
 /*
  * test_public_api — the public API (include/lisa.h), used exactly as a
  * program would: only lisa.h is included.

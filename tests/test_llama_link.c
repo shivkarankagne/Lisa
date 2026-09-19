@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/* SPDX-License-Identifier: BUSL-1.1 */
 /*
  * test_llama_link — the vendored llama.cpp builds as static libraries,
  * links into a C program, and initialises with the expected backends.

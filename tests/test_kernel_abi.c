@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/* SPDX-License-Identifier: BUSL-1.1 */
 /*
  * test_kernel_abi — AAPCS64 conformance of the ARM64 assembly kernel.
  *

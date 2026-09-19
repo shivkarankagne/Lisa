@@ -1,4 +1,4 @@
-/* SPDX-License-Identifier: Apache-2.0 */
+/* SPDX-License-Identifier: BUSL-1.1 */
 /*
  * LISA Storage v2. See store.h for the contract and
  * docs/formats/collection-v2.md for the on-disk format.

@@ -1,8 +1,15 @@
 LISA — Low-level Intelligent Search Accelerator
 Copyright 2026 Shivkaran Kagne
 
-This product is licensed under the Apache License, Version 2.0.
-See the LICENSE file for details.
+LISA is licensed under the Business Source License 1.1 (see LICENSE).
+Individuals may use it free of charge for their own personal purposes.
+Use by or on behalf of any organization (company, bank, government or
+public body, institution, non-profit, ...) requires a commercial license.
+Each version becomes available under the Apache License 2.0 or GPL 2.0 or
+later four years after its release.
 
 Versions published before 2026-09-18 were released under the MIT License
 and remain available under that license.
+
+Third-party components are licensed separately; see third_party/README.md
+and each component's LICENSE and INTAKE.md.

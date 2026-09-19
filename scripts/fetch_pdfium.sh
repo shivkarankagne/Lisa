@@ -1,5 +1,5 @@
 #!/bin/bash
-# SPDX-License-Identifier: Apache-2.0
+# SPDX-License-Identifier: BUSL-1.1
 #
 # Download LISA's prebuilt static PDFium, verify it, and unpack it into
 # .deps/pdfium. This is the normal way to get PDFium; scripts/build_pdfium.sh

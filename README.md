@@ -106,7 +106,11 @@ claim new numbers without a separate measured package.
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Enterprise features are available under a separate commercial license.
+Business Source License 1.1 (source-available). **Free for individuals**
+for their own personal use. **Organizations** — companies, banks,
+government, institutions, non-profits — need a commercial license. Each
+version becomes Apache-2.0 / GPL-2.0-or-later four years after release.
+See [LICENSE](LICENSE) and [NOTICE](NOTICE).
 
 ---
 

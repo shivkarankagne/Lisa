@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: BUSL-1.1
 //
 // test_header_cxx — include/lisa.h compiles and links as C++ (extern "C",
 // no C-only constructs), so C++ programs and SDK bindings can use it.

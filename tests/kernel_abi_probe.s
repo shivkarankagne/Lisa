@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: Apache-2.0
+// SPDX-License-Identifier: BUSL-1.1
 //
 // kernel_abi_probe — calls _lisa_search_ultra under hostile ABI conditions.
 //

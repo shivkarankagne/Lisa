@@ -153,7 +153,7 @@ approve — as one file, with no server stack.
 | 13 | **Build system: CMake.** Replaces the Makefile. Required for Windows later and for vendoring llama.cpp now. |
 | 14 | **GUI is part of 1.0.** A web UI (HTML/CSS/JS) is compiled into the binary and served by `lisa serve` on localhost. `lisa gui` opens it in a native window using the OS web view via **webview/webview** (MIT); if no web view is available, it opens the system browser. One codebase works on every platform. No Electron, no Node, no separate app at runtime. |
 
-| 15 | **Open core.** The public GitHub repository (`Lisa`) is the free core under **Apache-2.0**. Paid enterprise features live in a separate private repository (`lisa-enterprise`) under a commercial license and plug in through the extension points in W3. The core never depends on enterprise code (§2b). |
+| 15 | **Source-available core, paid for organizations** (revised 2026-09-19). LISA's code is licensed under the **Business Source License 1.1**: free for individuals' personal use; every organization (company, bank, government, institution, non-profit) needs a commercial license; each version becomes Apache-2.0 / GPL-2.0-or-later four years after release. Paid enterprise features live in a separate private repository (`lisa-enterprise`) and plug in through the extension points in W3 (§2b). *Supersedes the earlier Apache-2.0 open-core decision; licence wording to be reviewed by a lawyer before the repository goes public.* |
 
 ---
 

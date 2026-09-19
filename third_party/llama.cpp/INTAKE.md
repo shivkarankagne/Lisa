@@ -28,7 +28,7 @@
 | hash: xxhash | BSD-2-Clause |
 | hash: rotate-bits | MIT |
 
-All permissive; compatible with LISA's Apache-2.0 core and with
+All permissive; compatible with LISA's own licence and with
 proprietary enterprise builds.
 
 ## Why this component

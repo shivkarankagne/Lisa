@@ -11,9 +11,11 @@ questions. LISA ingests, stores, searches, and answers with citations using a
 local model — with no Python, Docker, database server, or LLM server
 installed, and no internet.
 
-Open core: this repository is the free core under **Apache-2.0**. Paid
-enterprise features live in a separate private repo (`lisa-enterprise`) and
-must never be added here.
+Licensing: this repository is **source-available under BUSL-1.1**. It is
+free for individuals' personal use; organizations need a commercial
+license. Paid enterprise features live in a separate private repo
+(`lisa-enterprise`) and must never be added here. Do not accept outside
+contributions until a Contributor License Agreement is in place.
 
 ## Current phase: the working product (W0–W12)
 
@@ -193,7 +195,7 @@ After changing code:
 - Match the surrounding style: 4-space indent, block comments above
   functions describing the contract, errors as documented negative return
   codes.
-- New source files start with `/* SPDX-License-Identifier: Apache-2.0 */`.
+- New source files start with `/* SPDX-License-Identifier: BUSL-1.1 */`.
 - Explicit ownership and lifetime in every public function's comment.
 - No global mutable state outside handle tables owned by one module.
 
