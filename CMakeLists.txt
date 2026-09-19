@@ -119,7 +119,8 @@ if(EXISTS "${LISA_PDFIUM_DIR}/lib/libpdfium.a")
     endif()
 elseif(LISA_REQUIRE_PDF)
     message(FATAL_ERROR
-        "PDFium not found in ${LISA_PDFIUM_DIR}. Build it with scripts/build_pdfium.sh "
+        "PDFium not found in ${LISA_PDFIUM_DIR}. Get it with scripts/fetch_pdfium.sh "
+        "(prebuilt, verified) or build it with scripts/build_pdfium.sh "
         "(or configure with -DLISA_REQUIRE_PDF=OFF to build without PDF support).")
 else()
     message(WARNING "Building WITHOUT PDF support (LISA_REQUIRE_PDF=OFF).")

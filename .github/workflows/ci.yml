@@ -58,18 +58,10 @@ jobs:
           get Qwen/Qwen3-Embedding-0.6B-GGUF 370f27d7550e0def9b39c1f16d3fbaa13aa67728 \
               Qwen3-Embedding-0.6B-Q8_0.gguf 06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439
 
-      - name: Cache PDFium
-        uses: actions/cache@v4
-        with:
-          path: .deps/pdfium
-          key: pdfium-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/build_pdfium.sh') }}
-
-      - name: Build PDFium (first run only)
-        run: |
-          if [ ! -f .deps/pdfium/lib/libpdfium.a ]; then
-            scripts/build_pdfium.sh
-            rm -rf .deps/pdfium-src   # keep the cache small; only the result is cached
-          fi
+      - name: Fetch PDFium (prebuilt, SHA-256 verified)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/fetch_pdfium.sh
 
       - name: Configure
         run: cmake -S . -B build -DLISA_REQUIRE_PDF=ON ${{ matrix.config.args }}

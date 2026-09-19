@@ -1,7 +1,9 @@
 # PDFium — intake record
 
-PDFium is **built from source** by `scripts/build_pdfium.sh` into
-`.deps/pdfium` (not committed). No static macOS library is published
+PDFium is **built from source** by `scripts/build_pdfium.sh`. The result
+is published once as a prebuilt archive, which developers and CI download
+and verify with `scripts/fetch_pdfium.sh` into `.deps/pdfium` (not
+committed). No static macOS library is published
 (pdfium-binaries ships only `libpdfium.dylib`), and a separate dylib would
 break the single-executable rule.
 
@@ -66,9 +68,25 @@ Build requirements: git, python3, network, ~5 GB disk, and on macOS a
 full **Xcode** installation (Chromium's build reads SDK information that
 the Command Line Tools do not provide).
 
+## Prebuilt archive
+
+| Field | Value |
+| :--- | :--- |
+| Release | `deps-pdfium-chromium-8057-mac-arm64` in this repository |
+| Asset | `pdfium-chromium-8057-mac-arm64.tar.gz` (7.0 MB) |
+| SHA-256 | `07ae3e816fee0626ffd1c31cc3b10be3bbadccad3eb3033691b777d1dd5c0ba9` |
+| Built by | `scripts/build_pdfium.sh` at commit `2724c02`, Xcode 27.0, Apple M2 |
+| Contents | `lib/libpdfium.a`, `include/`, `LICENSE`, `VERSION` (provenance) |
+
+Anyone can rebuild with `scripts/build_pdfium.sh` and compare. The fetch
+script refuses an archive whose hash does not match.
+
 ## Update procedure
 
 1. Pick the branch matching the new pdfium-binaries release; record its
    commit in the script and here.
 2. Re-check the bundled component licences.
-3. Run the script, the full test suite, and `otool -L build/lisa`.
+3. Run `scripts/build_pdfium.sh`, the full test suite, and `otool -L build/lisa`.
+4. Package `.deps/pdfium` as a new release asset (new tag per version and
+   platform); update `TAG`, `ASSET`, `SHA256`, `COMMIT` in
+   `scripts/fetch_pdfium.sh` and the table above.
