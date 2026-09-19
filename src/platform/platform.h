@@ -20,6 +20,7 @@
  * Return codes: 0 on success, or one of the negative LISA_PLAT_E* codes.
  */
 
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 
@@ -82,6 +83,17 @@ int lisa_dir_walk(const char* root, int include_hidden, lisa_walk_fn fn, void* u
 
 /* Create one directory (parent must exist). EEXIST if it already exists. */
 int lisa_mkdir(const char* path);
+
+/* Create a directory and any missing parents. OK if it already exists. */
+int lisa_mkdirs(const char* path);
+
+/*
+ * Visit the entries of one directory (not recursive), sorted by name,
+ * without "." and "..". Return non-zero from fn to stop (that value is
+ * returned).
+ */
+typedef int (*lisa_list_fn)(void* user, const char* name, int is_dir);
+int lisa_dir_list(const char* dir, lisa_list_fn fn, void* user);
 
 /* Size of a regular file in bytes, or a negative LISA_PLAT_E* code. */
 int64_t lisa_file_size(const char* path);
@@ -166,6 +178,32 @@ int  lisa_mutex_create(lisa_mutex_t** out);
 void lisa_mutex_lock(lisa_mutex_t* m);
 void lisa_mutex_unlock(lisa_mutex_t* m);
 void lisa_mutex_destroy(lisa_mutex_t* m);   /* NULL is ignored */
+
+/* ---- process and environment --------------------------------------- */
+
+/*
+ * The per-user directory for LISA's data, malloc'd (NULL if it cannot be
+ * determined): ~/Library/Application Support/LISA on macOS,
+ * $XDG_DATA_HOME/lisa or ~/.local/share/lisa elsewhere. Not created.
+ */
+char* lisa_default_data_dir(void);
+
+/* Absolute path of the running executable, malloc'd; NULL if unknown. */
+char* lisa_executable_path(void);
+
+/* Fill buf with n cryptographically secure random bytes. */
+int lisa_random_bytes(void* buf, size_t n);
+
+/*
+ * After lisa_stop_signals_install(), an interrupt or termination request
+ * (Ctrl-C, SIGTERM) sets a flag instead of killing the process;
+ * lisa_stop_requested() reports it.
+ */
+int lisa_stop_signals_install(void);
+int lisa_stop_requested(void);
+
+/* Sleep for ms milliseconds. */
+void lisa_sleep_ms(int64_t ms);
 
 /* ---- time ----------------------------------------------------------- */
 

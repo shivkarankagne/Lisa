@@ -7,6 +7,7 @@
  * the build tree) and works only inside it.
  */
 
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -78,6 +79,19 @@ static void touch(const char* dir, const char* name) {
         fclose(f);
     }
     free(p);
+}
+
+typedef struct {
+    char names[16][32];
+    int  n, dirs, stop_after;
+} list_log_t;
+
+static int on_entry(void* user, const char* name, int is_dir) {
+    list_log_t* l = (list_log_t*)user;
+    if (l->n < 16) snprintf(l->names[l->n], sizeof(l->names[0]), "%s", name);
+    l->n++;
+    l->dirs += is_dir;
+    return l->stop_after && l->n >= l->stop_after ? 9 : 0;
 }
 
 int main(int argc, char** argv) {
@@ -223,6 +237,44 @@ int main(int argc, char** argv) {
     check(lisa_dir_walk(wroot, 0, on_file, &w) == 7 && w.n == 2, "walk: callback stops the walk");
     check(lisa_dir_walk(a, 0, on_file, &w) == LISA_PLAT_EINVAL, "walk on a file -> EINVAL");
     free(loop); free(hid); free(sub); free(wroot);
+
+    /* mkdirs, dir_list */
+    char* deep = lisa_path_join(dir, "m1/m2/m3");
+    check(deep && lisa_mkdirs(deep) == LISA_PLAT_OK && lisa_path_is_dir(deep), "mkdirs nested");
+    check(lisa_mkdirs(deep) == LISA_PLAT_OK, "mkdirs existing -> OK");
+    char* blocked = lisa_path_join(dir, "a.txt/x");
+    check(lisa_mkdirs(blocked) != LISA_PLAT_OK, "mkdirs through a file fails");
+    check(lisa_mkdirs("") == LISA_PLAT_EINVAL, "mkdirs empty -> EINVAL");
+    free(deep); free(blocked);
+    list_log_t ll;
+    memset(&ll, 0, sizeof(ll));
+    char* lroot = lisa_path_join(dir, "walk");
+    check(lisa_dir_list(lroot, on_entry, &ll) == LISA_PLAT_OK && ll.n == 5 &&
+          strcmp(ll.names[0], ".h.txt") == 0 && strcmp(ll.names[4], "sub") == 0 && ll.dirs == 2,
+          "dir_list: sorted, hidden included, dirs flagged, not recursive");
+    memset(&ll, 0, sizeof(ll));
+    ll.stop_after = 1;
+    check(lisa_dir_list(lroot, on_entry, &ll) == 9 && ll.n == 1, "dir_list: callback stops");
+    check(lisa_dir_list(missing, on_entry, &ll) == LISA_PLAT_ENOENT, "dir_list missing -> ENOENT");
+    free(lroot);
+
+    /* environment */
+    unsigned char r1[300], r2[300];
+    memset(r1, 0, sizeof(r1)); memset(r2, 0, sizeof(r2));
+    check(lisa_random_bytes(r1, sizeof(r1)) == LISA_PLAT_OK && lisa_random_bytes(r2, sizeof(r2)) == LISA_PLAT_OK &&
+          memcmp(r1, r2, sizeof(r1)) != 0, "random_bytes (> 256 bytes, differs)");
+    char* exe = lisa_executable_path();
+    check(exe && exe[0] == '/' && strstr(exe, "test_platform") != NULL, "executable_path");
+    free(exe);
+    char* dd = lisa_default_data_dir();
+    check(dd && dd[0] == '/', "default_data_dir is absolute");
+    free(dd);
+    check(lisa_stop_signals_install() == LISA_PLAT_OK && !lisa_stop_requested(), "stop signals install");
+    raise(SIGTERM);
+    check(lisa_stop_requested(), "SIGTERM sets the stop flag instead of exiting");
+    int64_t s0 = lisa_time_monotonic_ns();
+    lisa_sleep_ms(20);
+    check(lisa_time_monotonic_ns() - s0 >= 15000000LL, "sleep_ms");
 
     /* threads + mutex */
     shared_t sh = { NULL, 0 };

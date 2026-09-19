@@ -9,6 +9,7 @@
 #include "platform.h"
 
 #include <dirent.h>
+#include <signal.h>
 #include <errno.h>
 #include <limits.h>
 #include <pthread.h>
@@ -20,6 +21,10 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+#ifdef __APPLE__
+#include <mach-o/dyld.h>   /* _NSGetExecutablePath */
+#include <sys/random.h>    /* getentropy */
+#endif
 
 static int from_errno(int e) {
     switch (e) {
@@ -101,8 +106,10 @@ static int cmp_names(const void* a, const void* b) {
     return strcmp(*(const char* const*)a, *(const char* const*)b);
 }
 
-static int walk(const char* dir, int include_hidden, lisa_walk_fn fn, void* user, int depth) {
-    if (depth > 256) return LISA_PLAT_OK;  /* pathological nesting */
+/* Sorted entry names of dir (without "." and ".."); caller frees. */
+static int read_names(const char* dir, int include_hidden, char*** out, size_t* out_n) {
+    *out = NULL;
+    *out_n = 0;
     DIR* d = opendir(dir);
     if (d == NULL) return from_errno(errno);
 
@@ -130,7 +137,23 @@ static int walk(const char* dir, int include_hidden, lisa_walk_fn fn, void* user
         n++;
     }
     closedir(d);
-    if (rc == LISA_PLAT_OK) qsort(names, n, sizeof(char*), cmp_names);
+    if (rc != LISA_PLAT_OK) {
+        for (size_t i = 0; i < n; i++) free(names[i]);
+        free(names);
+        return rc;
+    }
+    if (n > 0) qsort(names, n, sizeof(char*), cmp_names);
+    *out = names;
+    *out_n = n;
+    return LISA_PLAT_OK;
+}
+
+static int walk(const char* dir, int include_hidden, lisa_walk_fn fn, void* user, int depth) {
+    if (depth > 256) return LISA_PLAT_OK;  /* pathological nesting */
+    char** names = NULL;
+    size_t n = 0;
+    int rc = read_names(dir, include_hidden, &names, &n);
+    if (rc != LISA_PLAT_OK) return rc;
 
     for (size_t i = 0; rc == LISA_PLAT_OK && i < n; i++) {
         char* path = lisa_path_join(dir, names[i]);
@@ -162,6 +185,44 @@ int lisa_dir_walk(const char* root, int include_hidden, lisa_walk_fn fn, void* u
     if (rc != LISA_PLAT_OK) return rc;
     if (!info.is_dir) return LISA_PLAT_EINVAL;
     return walk(root, include_hidden, fn, user, 0);
+}
+
+int lisa_dir_list(const char* dir, lisa_list_fn fn, void* user) {
+    if (dir == NULL || fn == NULL) return LISA_PLAT_EINVAL;
+    char** names = NULL;
+    size_t n = 0;
+    int rc = read_names(dir, 1, &names, &n);
+    for (size_t i = 0; rc == LISA_PLAT_OK && i < n; i++) {
+        char* path = lisa_path_join(dir, names[i]);
+        if (path == NULL) {
+            rc = LISA_PLAT_ENOMEM;
+            break;
+        }
+        int stop = fn(user, names[i], lisa_path_is_dir(path));
+        free(path);
+        if (stop != 0) rc = stop;
+    }
+    for (size_t i = 0; i < n; i++) free(names[i]);
+    free(names);
+    return rc;
+}
+
+int lisa_mkdirs(const char* path) {
+    if (path == NULL || path[0] == '\0') return LISA_PLAT_EINVAL;
+    char* p = strdup(path);
+    if (p == NULL) return LISA_PLAT_ENOMEM;
+    int rc = LISA_PLAT_OK;
+    for (char* c = p + 1; rc == LISA_PLAT_OK; c++) {
+        if (*c != '/' && *c != '\0') continue;
+        char saved = *c;
+        *c = '\0';
+        if (mkdir(p, 0755) != 0 && errno != EEXIST) rc = from_errno(errno);
+        *c = saved;
+        if (saved == '\0') break;
+    }
+    free(p);
+    if (rc == LISA_PLAT_OK && !lisa_path_is_dir(path)) rc = LISA_PLAT_EEXIST;   /* a file is in the way */
+    return rc;
 }
 
 int lisa_mkdir(const char* path) {
@@ -387,6 +448,87 @@ void lisa_mutex_destroy(lisa_mutex_t* m) {
     if (m == NULL) return;
     pthread_mutex_destroy(&m->m);
     free(m);
+}
+
+/* ---- process and environment --------------------------------------- */
+
+static char* concat(const char* a, const char* b) {
+    size_t na = strlen(a), nb = strlen(b);
+    char* r = (char*)malloc(na + nb + 1);
+    if (r == NULL) return NULL;
+    memcpy(r, a, na);
+    memcpy(r + na, b, nb + 1);
+    return r;
+}
+
+char* lisa_default_data_dir(void) {
+    const char* home = getenv("HOME");
+#ifdef __APPLE__
+    if (home == NULL || home[0] == '\0') return NULL;
+    return concat(home, "/Library/Application Support/LISA");
+#else
+    const char* xdg = getenv("XDG_DATA_HOME");
+    if (xdg != NULL && xdg[0] == '/') return concat(xdg, "/lisa");
+    if (home == NULL || home[0] == '\0') return NULL;
+    return concat(home, "/.local/share/lisa");
+#endif
+}
+
+char* lisa_executable_path(void) {
+#ifdef __APPLE__
+    uint32_t size = 0;
+    _NSGetExecutablePath(NULL, &size);
+    char* raw = (char*)malloc(size + 1);
+    if (raw == NULL) return NULL;
+    if (_NSGetExecutablePath(raw, &size) != 0) {
+        free(raw);
+        return NULL;
+    }
+    char* real = realpath(raw, NULL);
+    free(raw);
+    return real;
+#else
+    return realpath("/proc/self/exe", NULL);
+#endif
+}
+
+int lisa_random_bytes(void* buf, size_t n) {
+    if (buf == NULL && n > 0) return LISA_PLAT_EINVAL;
+    unsigned char* p = (unsigned char*)buf;
+    while (n > 0) {
+        size_t k = n < 256 ? n : 256;   /* getentropy's limit per call */
+        if (getentropy(p, k) != 0) return LISA_PLAT_EIO;
+        p += k;
+        n -= k;
+    }
+    return LISA_PLAT_OK;
+}
+
+static volatile sig_atomic_t g_stop;
+
+static void on_stop_signal(int sig) {
+    (void)sig;
+    g_stop = 1;
+}
+
+int lisa_stop_signals_install(void) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = on_stop_signal;
+    sigemptyset(&sa.sa_mask);
+    if (sigaction(SIGINT, &sa, NULL) != 0 || sigaction(SIGTERM, &sa, NULL) != 0) return LISA_PLAT_EIO;
+    signal(SIGPIPE, SIG_IGN);   /* a closed client socket must not kill the server */
+    return LISA_PLAT_OK;
+}
+
+int lisa_stop_requested(void) {
+    return g_stop != 0;
+}
+
+void lisa_sleep_ms(int64_t ms) {
+    if (ms <= 0) return;
+    struct timespec ts = { (time_t)(ms / 1000), (long)(ms % 1000) * 1000000L };
+    while (nanosleep(&ts, &ts) != 0 && errno == EINTR && !g_stop) {}
 }
 
 /* ---- time ----------------------------------------------------------- */
