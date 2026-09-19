@@ -43,8 +43,13 @@ export PATH="$WORK/depot_tools:$WORK/depot_tools/.cipd_bin:$PATH"
 export DEPOT_TOOLS_METRICS=0
 # One-time setup of the tools' own Python/CIPD environment (gn, ninja).
 # After that, keep depot_tools pinned at the version we cloned.
-if [ ! -f depot_tools/python3_bin_reldir.txt ]; then
-    depot_tools/ensure_bootstrap
+# Called by absolute path: the script locates its own directory from $0.
+if [ ! -f "$WORK/depot_tools/python3_bin_reldir.txt" ]; then
+    "$WORK/depot_tools/ensure_bootstrap"
+fi
+if [ ! -f "$WORK/depot_tools/python3_bin_reldir.txt" ]; then
+    echo "error: depot_tools bootstrap failed (python3_bin_reldir.txt missing)" >&2
+    exit 1
 fi
 export DEPOT_TOOLS_UPDATE=0
 
