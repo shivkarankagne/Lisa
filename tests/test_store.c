@@ -15,6 +15,7 @@
 #include "../src/retrieval/retrieval.h"
 #include "../src/storage/storage.h"
 #include "../src/storage/store.h"
+#include "sqlite3.h"
 
 #define DIM 13
 #define MODEL "test-embed-v1"
@@ -37,6 +38,7 @@ static lisa_store_chunk_t chunk_for(const char* doc, int64_t i) {
     c.length = 100;
     c.text = (char*)"some chunk text";
     c.content_hash = (char*)"abc123";
+    c.page = 0;
     return c;
 }
 
@@ -404,6 +406,190 @@ static void test_migrate_v1_preserves_order_as_ids(void) {
     free(vecs);
 }
 
+
+/* ---- document records (format v2) ------------------------------------ */
+
+static lisa_store_doc_t doc_rec(const char* id, const char* status, int64_t size) {
+    lisa_store_doc_t d;
+    memset(&d, 0, sizeof(d));
+    d.doc_id = (char*)id;
+    d.source_path = (char*)id;
+    d.content_hash = (char*)"hash-1";
+    d.size = size;
+    d.mtime_ns = 1000;
+    d.title = (char*)"A Title";
+    d.status = (char*)status;
+    d.message = (char*)"";
+    return d;
+}
+
+typedef struct {
+    char paths[8][128];
+    int  n;
+} doc_seen_t;
+
+static int collect_doc(void* user, const lisa_store_doc_t* d) {
+    doc_seen_t* seen = (doc_seen_t*)user;
+    snprintf(seen->paths[seen->n++], 128, "%s", d->source_path);
+    return 0;
+}
+
+static void test_replace_doc_and_records(void) {
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_create(g_dir, MODEL, DIM));
+    lisa_store_t *s = NULL, *r = NULL;
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_open(g_dir, LISA_STORE_WRITE, NULL, &s));
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_open(g_dir, LISA_STORE_READ, NULL, &r));
+
+    /* First version: 3 chunks, with pages. */
+    float v[3 * DIM];
+    lisa_store_chunk_t c[3];
+    for (int i = 0; i < 3; i++) {
+        vec_for((uint64_t)i, v + i * DIM);
+        c[i] = chunk_for("ignored", i);
+        c[i].page = i + 1;
+    }
+    lisa_store_doc_t d = doc_rec("/docs/a.pdf", "ok", 100);
+    uint64_t ids[3];
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_replace_doc(s, &d, 3, v, c, ids));
+    TEST_ASSERT_EQUAL_INT64(3, lisa_store_count(s));
+
+    lisa_store_chunk_t got;
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_get(s, ids[2], &got));
+    TEST_ASSERT_EQUAL_STRING("/docs/a.pdf", got.doc_id);   /* doc_id forced to the record's */
+    TEST_ASSERT_EQUAL_INT64(3, got.page);
+    lisa_store_chunk_free(&got);
+
+    lisa_store_doc_t rec;
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_doc_get(s, "/docs/a.pdf", &rec));
+    TEST_ASSERT_EQUAL_INT64(3, rec.chunk_count);
+    TEST_ASSERT_EQUAL_STRING("ok", rec.status);
+    TEST_ASSERT_EQUAL_STRING("A Title", rec.title);
+    TEST_ASSERT_EQUAL_INT64(100, rec.size);
+    lisa_store_doc_free(&rec);
+
+    /* Second version replaces the first atomically: old IDs gone, new ones fresh. */
+    d.content_hash = (char*)"hash-2";
+    uint64_t ids2[2];
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_replace_doc(s, &d, 2, v, c, ids2));
+    TEST_ASSERT_EQUAL_INT64(2, lisa_store_count(s));
+    TEST_ASSERT_TRUE(ids2[0] > ids[2]);
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_ENOTFOUND, lisa_store_get(s, ids[0], &got));
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_doc_get(s, "/docs/a.pdf", &rec));
+    TEST_ASSERT_EQUAL_STRING("hash-2", rec.content_hash);
+    TEST_ASSERT_EQUAL_INT64(2, rec.chunk_count);
+    lisa_store_doc_free(&rec);
+
+    /* A document with no text: record kept, no chunks. */
+    lisa_store_doc_t e = doc_rec("/docs/scan.pdf", "no_text", 5);
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_replace_doc(s, &e, 0, NULL, NULL, NULL));
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_doc_get(s, "/docs/scan.pdf", &rec));
+    TEST_ASSERT_EQUAL_STRING("no_text", rec.status);
+    TEST_ASSERT_EQUAL_INT64(0, rec.chunk_count);
+    lisa_store_doc_free(&rec);
+
+    /* touch */
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_doc_touch(s, "/docs/scan.pdf", 6, 2000));
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_doc_get(s, "/docs/scan.pdf", &rec));
+    TEST_ASSERT_EQUAL_INT64(6, rec.size);
+    TEST_ASSERT_EQUAL_INT64(2000, rec.mtime_ns);
+    lisa_store_doc_free(&rec);
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_ENOTFOUND, lisa_store_doc_touch(s, "/nope", 1, 1));
+
+    /* list by prefix, ordered */
+    lisa_store_doc_t other = doc_rec("/other/b.md", "ok", 1);
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_replace_doc(s, &other, 1, v, c, NULL));
+    doc_seen_t seen;
+    memset(&seen, 0, sizeof(seen));
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_doc_list(s, "/docs/", collect_doc, &seen));
+    TEST_ASSERT_EQUAL_INT(2, seen.n);
+    TEST_ASSERT_EQUAL_STRING("/docs/a.pdf", seen.paths[0]);
+    TEST_ASSERT_EQUAL_STRING("/docs/scan.pdf", seen.paths[1]);
+    memset(&seen, 0, sizeof(seen));
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_doc_list(s, NULL, collect_doc, &seen));
+    TEST_ASSERT_EQUAL_INT(3, seen.n);
+
+    /* delete_doc removes chunks and record */
+    int64_t n = 0;
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_delete_doc(s, "/docs/a.pdf", &n));
+    TEST_ASSERT_EQUAL_INT64(2, n);
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_ENOTFOUND, lisa_store_doc_get(s, "/docs/a.pdf", &rec));
+
+    /* readers see it after refresh; read-only handles cannot write */
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_refresh(r));
+    TEST_ASSERT_EQUAL_INT64(1, lisa_store_count(r));
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_EREADONLY, lisa_store_replace_doc(r, &d, 0, NULL, NULL, NULL));
+    lisa_store_doc_t bad = doc_rec("/x", "ok", 1);
+    bad.status = NULL;
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_EINVAL, lisa_store_replace_doc(s, &bad, 0, NULL, NULL, NULL));
+    lisa_store_close(r);
+    lisa_store_close(s);
+}
+
+/* Make a v2 collection look exactly like format v1 on disk. */
+static void downgrade_to_v1(const char* dir) {
+    char* db = lisa_path_join(dir, "meta.sqlite");
+    sqlite3* h = NULL;
+    TEST_ASSERT_EQUAL_INT(SQLITE_OK, sqlite3_open(db, &h));
+    TEST_ASSERT_EQUAL_INT(SQLITE_OK, sqlite3_exec(h,
+        "DROP TABLE documents;"
+        "ALTER TABLE chunks DROP COLUMN page;"
+        "UPDATE meta SET value = 1 WHERE key = 'format_version';", NULL, NULL, NULL));
+    sqlite3_close(h);
+    free(db);
+}
+
+static int count_backup(void* user, const char* path, const lisa_file_info_t* info) {
+    (void)info;
+    const char* base = strrchr(path, '/');
+    if (base && strncmp(base + 1, "meta.v1-backup-", 15) == 0) (*(int*)user)++;
+    return 0;
+}
+
+static int count_backups(const char* dir) {
+    int n = 0;
+    TEST_ASSERT_EQUAL_INT(LISA_PLAT_OK, lisa_dir_walk(dir, 0, count_backup, &n));
+    return n;
+}
+
+static void test_migrate_format_v1_to_v2(void) {
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_create(g_dir, MODEL, DIM));
+    lisa_store_t* s = NULL;
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_open(g_dir, LISA_STORE_WRITE, NULL, &s));
+    insert_n(s, "d", 4, 0, NULL);
+    lisa_store_close(s);
+    downgrade_to_v1(g_dir);
+
+    /* A read-only open migrates (taking the writer lock briefly). */
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_open(g_dir, LISA_STORE_READ, NULL, &s));
+    TEST_ASSERT_EQUAL_INT64(4, lisa_store_count(s));
+    for (uint64_t id = 0; id < 4; id++) check_vector(s, id);
+    lisa_store_chunk_t got;
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_get(s, 1, &got));
+    TEST_ASSERT_EQUAL_INT64(0, got.page);
+    lisa_store_chunk_free(&got);
+    lisa_store_close(s);
+    TEST_ASSERT_EQUAL_INT(1, count_backups(g_dir));
+
+    /* Opening again does not migrate or back up again; v2 features work. */
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_open(g_dir, LISA_STORE_WRITE, NULL, &s));
+    lisa_store_doc_t d = doc_rec("/docs/new.txt", "ok", 1);
+    float v[DIM];
+    lisa_store_chunk_t c = chunk_for("x", 0);
+    vec_for(9, v);
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_replace_doc(s, &d, 1, v, &c, NULL));
+    lisa_store_close(s);
+    TEST_ASSERT_EQUAL_INT(1, count_backups(g_dir));
+
+    /* A newer format than this build understands is refused. */
+    char* db = lisa_path_join(g_dir, "meta.sqlite");
+    sqlite3* h = NULL;
+    sqlite3_open(db, &h);
+    sqlite3_exec(h, "UPDATE meta SET value = 99 WHERE key = 'format_version';", NULL, NULL, NULL);
+    sqlite3_close(h);
+    free(db);
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_EFORMAT, lisa_store_open(g_dir, LISA_STORE_READ, NULL, &s));
+}
+
 int main(int argc, char** argv) {
     if (argc != 2) {
         fprintf(stderr, "usage: %s <scratch_dir>\n", argv[0]);
@@ -424,5 +610,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_corrupt_vector_header_is_rejected);
     RUN_TEST(test_truncated_vector_file_is_rejected);
     RUN_TEST(test_migrate_v1_preserves_order_as_ids);
+    RUN_TEST(test_replace_doc_and_records);
+    RUN_TEST(test_migrate_format_v1_to_v2);
     return UNITY_END() == 0 ? 0 : 1;
 }

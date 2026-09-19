@@ -1,7 +1,8 @@
 # Collection format v2
 
 Storage v2 collection directory, as written by `src/storage/store.c`.
-Format version: **1** (`LISA_STORE_FORMAT_VERSION`). Any change to this
+Database format version: **2** (`LISA_STORE_FORMAT_VERSION`); vector file
+format version: **1**. Any change to this
 document requires a version bump and a migration (plan §7, upgrade rule 3).
 
 ## Directory
@@ -33,16 +34,31 @@ CREATE TABLE chunks (
   src_offset   INTEGER NOT NULL,
   src_length   INTEGER NOT NULL,
   text         TEXT    NOT NULL,
-  content_hash TEXT    NOT NULL
+  content_hash TEXT    NOT NULL,
+  page         INTEGER NOT NULL DEFAULT 0   -- 1-based start page; 0 = unpaged (v2)
 );
 CREATE INDEX chunks_doc_id ON chunks(doc_id);
+
+-- v2: one row per source document known to the collection
+CREATE TABLE documents (
+  doc_id       TEXT PRIMARY KEY,   -- equals chunks.doc_id
+  source_path  TEXT    NOT NULL,   -- absolute path of the file
+  content_hash TEXT    NOT NULL,   -- hash of the file bytes
+  size         INTEGER NOT NULL,
+  mtime_ns     INTEGER NOT NULL,
+  title        TEXT    NOT NULL,
+  chunk_count  INTEGER NOT NULL,
+  status       TEXT    NOT NULL,   -- "ok" | "no_text" | "error"
+  message      TEXT    NOT NULL
+);
+CREATE INDEX documents_source_path ON documents(source_path);
 ```
 
 `meta` keys:
 
 | Key | Type | Meaning |
 | :--- | :--- | :--- |
-| `format_version` | integer | `1` |
+| `format_version` | integer | `2` |
 | `embedding_model` | text | Model that produced the vectors; fixed at creation |
 | `dim` | integer | Vector dimension, 1..65536; fixed at creation |
 | `next_id` | integer | Next chunk ID to assign (IDs start at 0) |
@@ -59,7 +75,7 @@ Little-endian throughout.
 | Offset | Size | Field |
 | :--- | :--- | :--- |
 | 0 | 8 | Magic `LISAVECT` |
-| 8 | 4 | Format version (u32) = 1 |
+| 8 | 4 | Vector file format version (u32) = 1 |
 | 12 | 4 | Byte-order mark (u32) = `0x01020304`, read little-endian |
 | 16 | 8 | `dim` (u64); must equal `meta.dim` |
 | 24 | 8 | Generation (u64); must equal `<gen>` in the file name |
@@ -92,8 +108,13 @@ tombstones (deleted chunks) until compaction.
 A crash before step 4 leaves uncommitted bytes past `slot_count`, which
 are ignored and later overwritten.
 
-**Delete**: one transaction deleting `chunks` rows and incrementing
-`change_counter`. The vector file is not touched.
+**Delete**: one transaction deleting `chunks` rows (and, for a whole
+document, its `documents` row) and incrementing `change_counter`. The
+vector file is not touched.
+
+**Replace a document** (v2): one transaction that deletes the document's
+chunks, appends and inserts its new chunks (same protocol as insert), and
+writes its `documents` row. A crash leaves the old or the new version.
 
 **Compact** (one transaction):
 
@@ -111,11 +132,24 @@ file is a leftover. Leftovers are removed when a writer next opens.
 Readers that mapped the old file keep a valid mapping (POSIX keeps an
 unlinked, mapped file alive) until they refresh.
 
+## Migration from database format 1
+
+Opening a format-1 collection (any mode) upgrades it in place, holding
+the writer lock (taken briefly by read-only opens; `EBUSY` if another
+writer holds it):
+
+1. `VACUUM INTO 'meta.v1-backup-<n>.sqlite'` — a consistent copy of the
+   old database, never overwritten.
+2. One transaction: `ALTER TABLE chunks ADD COLUMN page ... DEFAULT 0`,
+   create `documents`, set `format_version = 2`.
+
+A `format_version` newer than this build is rejected (`EFORMAT`).
+
 ## Compatibility
 
 - v1 / v1.1 collections (`header.bin` + `vectors.bin`, see
   `src/storage/storage.h`) are not opened by v2; convert them with
   `lisa_store_migrate_v1()`, which gives old vector `i` the ID `i`.
-- A `format_version` other than 1, a bad magic, byte-order mark,
+- A `format_version` newer than 2, a bad magic, byte-order mark,
   dimension, or generation in the vector header, or a short vector file,
   is rejected with `LISA_STORE_EFORMAT`.

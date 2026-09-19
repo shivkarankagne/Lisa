@@ -17,6 +17,7 @@
 #define VEC_HEADER_SIZE  64
 #define VEC_MAGIC        "LISAVECT"
 #define VEC_BOM          0x01020304u
+#define VEC_FORMAT       1        /* vector file format (independent of the database format) */
 #define MAX_DIM          65536
 #define MIGRATE_BATCH    4096
 #define DEAD_ID          UINT64_MAX
@@ -95,7 +96,7 @@ static int write_vec_header(FILE* f, int64_t dim, int64_t gen) {
     unsigned char h[VEC_HEADER_SIZE];
     memset(h, 0, sizeof(h));
     memcpy(h, VEC_MAGIC, 8);
-    put_u32(h + 8, LISA_STORE_FORMAT_VERSION);
+    put_u32(h + 8, VEC_FORMAT);
     put_u32(h + 12, VEC_BOM);
     put_u64(h + 16, (uint64_t)dim);
     put_u64(h + 24, (uint64_t)gen);
@@ -105,7 +106,7 @@ static int write_vec_header(FILE* f, int64_t dim, int64_t gen) {
 static int check_vec_header(const unsigned char* h, int64_t size, int64_t dim, int64_t gen) {
     if (size < VEC_HEADER_SIZE) return LISA_STORE_EFORMAT;
     if (memcmp(h, VEC_MAGIC, 8) != 0) return LISA_STORE_EFORMAT;
-    if (get_u32(h + 8) != LISA_STORE_FORMAT_VERSION) return LISA_STORE_EFORMAT;
+    if (get_u32(h + 8) != VEC_FORMAT) return LISA_STORE_EFORMAT;
     if (get_u32(h + 12) != VEC_BOM) return LISA_STORE_EFORMAT;
     if ((int64_t)get_u64(h + 16) != dim) return LISA_STORE_EFORMAT;
     if ((int64_t)get_u64(h + 24) != gen) return LISA_STORE_EFORMAT;
@@ -266,6 +267,20 @@ static int open_db(const char* dir, sqlite3** out) {
     return LISA_STORE_OK;
 }
 
+#define DOCUMENTS_SCHEMA \
+    "CREATE TABLE documents (" \
+    "  doc_id       TEXT PRIMARY KEY," \
+    "  source_path  TEXT    NOT NULL," \
+    "  content_hash TEXT    NOT NULL," \
+    "  size         INTEGER NOT NULL," \
+    "  mtime_ns     INTEGER NOT NULL," \
+    "  title        TEXT    NOT NULL," \
+    "  chunk_count  INTEGER NOT NULL," \
+    "  status       TEXT    NOT NULL," \
+    "  message      TEXT    NOT NULL" \
+    ");" \
+    "CREATE INDEX documents_source_path ON documents(source_path);"
+
 static const char* k_schema =
     "CREATE TABLE meta ("
     "  key   TEXT PRIMARY KEY,"
@@ -280,9 +295,11 @@ static const char* k_schema =
     "  src_offset   INTEGER NOT NULL,"
     "  src_length   INTEGER NOT NULL,"
     "  text         TEXT    NOT NULL,"
-    "  content_hash TEXT    NOT NULL"
+    "  content_hash TEXT    NOT NULL,"
+    "  page         INTEGER NOT NULL DEFAULT 0"
     ");"
-    "CREATE INDEX chunks_doc_id ON chunks(doc_id);";
+    "CREATE INDEX chunks_doc_id ON chunks(doc_id);"
+    DOCUMENTS_SCHEMA;
 
 /* ---- in-memory slot table --------------------------------------------- */
 
@@ -407,6 +424,54 @@ int lisa_store_create(const char* dir, const char* embedding_model, int64_t dim)
     return rc;
 }
 
+/*
+ * Upgrade an older database format in place (plan §7, upgrade rule 3):
+ * back up meta.sqlite, then migrate in one transaction. Needs the writer
+ * lock; a read-only open takes it briefly. Newer formats are rejected.
+ */
+static int migrate_if_needed(lisa_store_t* s) {
+    int64_t version = 0;
+    int rc = meta_get_int(s->db, "format_version", &version);
+    if (rc != LISA_STORE_OK) return rc;
+    if (version == LISA_STORE_FORMAT_VERSION) return LISA_STORE_OK;
+    if (version != 1) return LISA_STORE_EFORMAT;
+
+    lisa_lock_t* temp = NULL;
+    if (s->lock == NULL) {
+        char* lock_path = lisa_path_join(s->dir, "write.lock");
+        if (lock_path == NULL) return LISA_STORE_ENOMEM;
+        int lrc = lisa_lock_acquire(lock_path, 0, &temp);
+        free(lock_path);
+        if (lrc == LISA_PLAT_EBUSY) return LISA_STORE_EBUSY;
+        if (lrc != LISA_PLAT_OK) return LISA_STORE_EIO;
+    }
+
+    /* Backup: a consistent copy of the old database, never overwritten. */
+    char name[64];
+    snprintf(name, sizeof(name), "meta.v1-backup-%lld.sqlite", (long long)lisa_time_monotonic_ns());
+    char* backup = lisa_path_join(s->dir, name);
+    sqlite3_stmt* st = NULL;
+    if (backup == NULL) rc = LISA_STORE_ENOMEM;
+    else if (sqlite3_prepare_v2(s->db, "VACUUM INTO ?;", -1, &st, NULL) != SQLITE_OK) rc = LISA_STORE_EIO;
+    else {
+        sqlite3_bind_text(st, 1, backup, -1, SQLITE_STATIC);
+        if (sqlite3_step(st) != SQLITE_DONE) rc = LISA_STORE_EIO;
+    }
+    sqlite3_finalize(st);
+    free(backup);
+
+    if (rc == LISA_STORE_OK) {
+        rc = exec(s->db, "BEGIN IMMEDIATE;");
+        if (rc == LISA_STORE_OK) rc = exec(s->db,
+            "ALTER TABLE chunks ADD COLUMN page INTEGER NOT NULL DEFAULT 0;" DOCUMENTS_SCHEMA);
+        if (rc == LISA_STORE_OK) rc = meta_set_int(s->db, "format_version", LISA_STORE_FORMAT_VERSION);
+        if (rc == LISA_STORE_OK) rc = exec(s->db, "COMMIT;");
+        else rollback(s->db);
+    }
+    lisa_lock_release(temp);
+    return rc;
+}
+
 int lisa_store_open(const char* dir, int mode, const char* expected_model,
                     lisa_store_t** out) {
     if (dir == NULL || out == NULL) return LISA_STORE_EINVAL;
@@ -443,6 +508,7 @@ int lisa_store_open(const char* dir, int mode, const char* expected_model,
         }
     }
     if (rc == LISA_STORE_OK) rc = open_db(dir, &s->db);
+    if (rc == LISA_STORE_OK) rc = migrate_if_needed(s);
 
     if (rc == LISA_STORE_OK) {
         rc = exec(s->db, "BEGIN;");
@@ -509,25 +575,69 @@ int64_t lisa_store_count(const lisa_store_t* s) {
 
 static int chunk_valid(const lisa_store_chunk_t* c) {
     return c->doc_id && c->source_path && c->text && c->content_hash &&
-           c->chunk_index >= 0 && c->offset >= 0 && c->length >= 0;
+           c->chunk_index >= 0 && c->offset >= 0 && c->length >= 0 && c->page >= 0;
 }
 
-int lisa_store_insert(lisa_store_t* s, int64_t count, const float* vectors,
-                      const lisa_store_chunk_t* chunks, uint64_t* out_ids) {
-    if (s == NULL || count <= 0 || vectors == NULL || chunks == NULL) return LISA_STORE_EINVAL;
-    if (s->mode != LISA_STORE_WRITE) return LISA_STORE_EREADONLY;
-    for (int64_t i = 0; i < count; i++) {
-        if (!chunk_valid(&chunks[i])) return LISA_STORE_EINVAL;
+/* Slots freed by a delete, applied to this handle's view after commit. */
+typedef struct {
+    int64_t* v;
+    int64_t  n, cap;
+} slots_t;
+
+static int slots_push(slots_t* l, int64_t slot) {
+    if (l->n == l->cap) {
+        int64_t cap = l->cap ? l->cap * 2 : 64;
+        int64_t* g = (int64_t*)realloc(l->v, (size_t)cap * sizeof(int64_t));
+        if (g == NULL) return LISA_STORE_ENOMEM;
+        l->v = g;
+        l->cap = cap;
     }
+    l->v[l->n++] = slot;
+    return LISA_STORE_OK;
+}
 
-    int rc = exec(s->db, "BEGIN IMMEDIATE;");
+/* Inside a write txn: delete doc_id's chunks, collecting their slots. */
+static int delete_doc_rows(lisa_store_t* s, const char* doc_id, slots_t* freed) {
+    sqlite3_stmt* st = NULL;
+    int rc = LISA_STORE_OK;
+    if (sqlite3_prepare_v2(s->db, "SELECT slot FROM chunks WHERE doc_id = ?;", -1, &st, NULL) != SQLITE_OK)
+        return LISA_STORE_EIO;
+    sqlite3_bind_text(st, 1, doc_id, -1, SQLITE_STATIC);
+    while (rc == LISA_STORE_OK && sqlite3_step(st) == SQLITE_ROW)
+        rc = slots_push(freed, sqlite3_column_int64(st, 0));
+    sqlite3_finalize(st);
     if (rc != LISA_STORE_OK) return rc;
+    if (sqlite3_prepare_v2(s->db, "DELETE FROM chunks WHERE doc_id = ?;", -1, &st, NULL) != SQLITE_OK)
+        return LISA_STORE_EIO;
+    sqlite3_bind_text(st, 1, doc_id, -1, SQLITE_STATIC);
+    rc = sqlite3_step(st) == SQLITE_DONE ? LISA_STORE_OK : LISA_STORE_EIO;
+    sqlite3_finalize(st);
+    return rc;
+}
 
-    int64_t slot_count = 0, next_id = 0, change = 0;
-    rc = meta_get_int(s->db, "slot_count", &slot_count);
+/* Values read inside an insert txn, applied to the view after commit. */
+typedef struct {
+    int64_t slot_count;  /* first new slot */
+    int64_t next_id;     /* first new id */
+    int64_t count;
+} pending_t;
+
+/*
+ * Inside a write txn: append count vectors past the committed end (synced)
+ * and insert their chunk rows. doc_id_override, if non-NULL, replaces each
+ * chunk's doc_id. Advances slot_count and next_id in meta.
+ */
+static int insert_rows(lisa_store_t* s, int64_t count, const float* vectors,
+                       const lisa_store_chunk_t* chunks, const char* doc_id_override,
+                       pending_t* pend) {
+    int64_t slot_count = 0, next_id = 0;
+    int rc = meta_get_int(s->db, "slot_count", &slot_count);
     if (rc == LISA_STORE_OK) rc = meta_get_int(s->db, "next_id", &next_id);
-    if (rc == LISA_STORE_OK) rc = meta_get_int(s->db, "change_counter", &change);
-    if (rc == LISA_STORE_OK) rc = reserve_slots(s, slot_count + count);
+    pend->slot_count = slot_count;
+    pend->next_id = next_id;
+    pend->count = 0;
+    if (rc != LISA_STORE_OK || count == 0) return rc;
+    rc = reserve_slots(s, slot_count + count);
 
     /* 1. Vectors beyond the committed end, synced before the commit. */
     if (rc == LISA_STORE_OK) {
@@ -544,44 +654,39 @@ int lisa_store_insert(lisa_store_t* s, int64_t count, const float* vectors,
     if (rc == LISA_STORE_OK &&
         sqlite3_prepare_v2(s->db,
             "INSERT INTO chunks(id, slot, doc_id, chunk_index, source_path,"
-            " src_offset, src_length, text, content_hash)"
-            " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?);", -1, &st, NULL) != SQLITE_OK)
+            " src_offset, src_length, text, content_hash, page)"
+            " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?);", -1, &st, NULL) != SQLITE_OK)
         rc = LISA_STORE_EIO;
     for (int64_t i = 0; rc == LISA_STORE_OK && i < count; i++) {
         const lisa_store_chunk_t* c = &chunks[i];
         sqlite3_reset(st);
         sqlite3_bind_int64(st, 1, next_id + i);
         sqlite3_bind_int64(st, 2, slot_count + i);
-        sqlite3_bind_text(st, 3, c->doc_id, -1, SQLITE_STATIC);
+        sqlite3_bind_text(st, 3, doc_id_override ? doc_id_override : c->doc_id, -1, SQLITE_STATIC);
         sqlite3_bind_int64(st, 4, c->chunk_index);
         sqlite3_bind_text(st, 5, c->source_path, -1, SQLITE_STATIC);
         sqlite3_bind_int64(st, 6, c->offset);
         sqlite3_bind_int64(st, 7, c->length);
         sqlite3_bind_text(st, 8, c->text, -1, SQLITE_STATIC);
         sqlite3_bind_text(st, 9, c->content_hash, -1, SQLITE_STATIC);
+        sqlite3_bind_int64(st, 10, c->page);
         if (sqlite3_step(st) != SQLITE_DONE) rc = LISA_STORE_EIO;
     }
     sqlite3_finalize(st);
 
     if (rc == LISA_STORE_OK) rc = meta_set_int(s->db, "slot_count", slot_count + count);
     if (rc == LISA_STORE_OK) rc = meta_set_int(s->db, "next_id", next_id + count);
-    if (rc == LISA_STORE_OK) rc = meta_set_int(s->db, "change_counter", change + 1);
-    if (rc == LISA_STORE_OK) rc = exec(s->db, "COMMIT;");
-    if (rc != LISA_STORE_OK) {
-        rollback(s->db);
-        return rc;
-    }
+    if (rc == LISA_STORE_OK) pend->count = count;
+    return rc;
+}
 
-    /* Committed: update this handle's view. */
-    for (int64_t i = 0; i < count; i++) {
-        s->live[slot_count + i] = 1;
-        s->slot_ids[slot_count + i] = (uint64_t)(next_id + i);
-        if (out_ids) out_ids[i] = (uint64_t)(next_id + i);
-    }
-    s->slot_count = slot_count + count;
-    s->live_count += count;
-    s->change = change + 1;
-    return LISA_STORE_OK;
+/* Inside a write txn: increment change_counter; *out gets the new value. */
+static int bump_change(lisa_store_t* s, int64_t* out) {
+    int64_t change = 0;
+    int rc = meta_get_int(s->db, "change_counter", &change);
+    if (rc == LISA_STORE_OK) rc = meta_set_int(s->db, "change_counter", change + 1);
+    *out = change + 1;
+    return rc;
 }
 
 /* Mark slots dead in this handle's view after a committed delete. */
@@ -593,6 +698,44 @@ static void kill_slots(lisa_store_t* s, const int64_t* slots, int64_t n) {
             s->live_count--;
         }
     }
+}
+
+/* After a commit: make this handle's view match the database. */
+static void apply_committed(lisa_store_t* s, const slots_t* freed, const pending_t* pend,
+                            int64_t change, uint64_t* out_ids) {
+    if (freed) kill_slots(s, freed->v, freed->n);
+    for (int64_t i = 0; pend && i < pend->count; i++) {
+        s->live[pend->slot_count + i] = 1;
+        s->slot_ids[pend->slot_count + i] = (uint64_t)(pend->next_id + i);
+        if (out_ids) out_ids[i] = (uint64_t)(pend->next_id + i);
+    }
+    if (pend && pend->count > 0) {
+        s->slot_count = pend->slot_count + pend->count;
+        s->live_count += pend->count;
+    }
+    s->change = change;
+}
+
+int lisa_store_insert(lisa_store_t* s, int64_t count, const float* vectors,
+                      const lisa_store_chunk_t* chunks, uint64_t* out_ids) {
+    if (s == NULL || count <= 0 || vectors == NULL || chunks == NULL) return LISA_STORE_EINVAL;
+    if (s->mode != LISA_STORE_WRITE) return LISA_STORE_EREADONLY;
+    for (int64_t i = 0; i < count; i++) {
+        if (!chunk_valid(&chunks[i])) return LISA_STORE_EINVAL;
+    }
+    int rc = exec(s->db, "BEGIN IMMEDIATE;");
+    if (rc != LISA_STORE_OK) return rc;
+    pending_t pend;
+    int64_t change = 0;
+    rc = insert_rows(s, count, vectors, chunks, NULL, &pend);
+    if (rc == LISA_STORE_OK) rc = bump_change(s, &change);
+    if (rc == LISA_STORE_OK) rc = exec(s->db, "COMMIT;");
+    if (rc != LISA_STORE_OK) {
+        rollback(s->db);
+        return rc;
+    }
+    apply_committed(s, NULL, &pend, change, out_ids);
+    return LISA_STORE_OK;
 }
 
 int lisa_store_delete(lisa_store_t* s, int64_t count, const uint64_t* ids) {
@@ -645,64 +788,176 @@ int lisa_store_delete(lisa_store_t* s, int64_t count, const uint64_t* ids) {
 }
 
 int lisa_store_delete_doc(lisa_store_t* s, const char* doc_id, int64_t* out_deleted) {
+    if (out_deleted) *out_deleted = 0;
     if (s == NULL || doc_id == NULL) return LISA_STORE_EINVAL;
     if (s->mode != LISA_STORE_WRITE) return LISA_STORE_EREADONLY;
-    if (out_deleted) *out_deleted = 0;
-
     int rc = exec(s->db, "BEGIN IMMEDIATE;");
     if (rc != LISA_STORE_OK) return rc;
-
-    int64_t n = 0, cap = 64;
-    int64_t* slots = (int64_t*)malloc((size_t)cap * sizeof(int64_t));
-    if (slots == NULL) rc = LISA_STORE_ENOMEM;
-
+    slots_t freed = { NULL, 0, 0 };
+    int64_t change = 0;
+    rc = delete_doc_rows(s, doc_id, &freed);
     sqlite3_stmt* st = NULL;
-    if (rc == LISA_STORE_OK &&
-        sqlite3_prepare_v2(s->db, "SELECT slot FROM chunks WHERE doc_id = ?;", -1, &st, NULL) != SQLITE_OK)
-        rc = LISA_STORE_EIO;
     if (rc == LISA_STORE_OK) {
-        sqlite3_bind_text(st, 1, doc_id, -1, SQLITE_STATIC);
-        int step;
-        while (rc == LISA_STORE_OK && (step = sqlite3_step(st)) == SQLITE_ROW) {
-            if (n == cap) {
-                int64_t* grown = (int64_t*)realloc(slots, (size_t)cap * 2 * sizeof(int64_t));
-                if (grown == NULL) {
-                    rc = LISA_STORE_ENOMEM;
-                    break;
-                }
-                slots = grown;
-                cap *= 2;
-            }
-            slots[n++] = sqlite3_column_int64(st, 0);
-        }
-    }
-    sqlite3_finalize(st);
-    st = NULL;
-
-    if (rc == LISA_STORE_OK && n > 0) {
-        if (sqlite3_prepare_v2(s->db, "DELETE FROM chunks WHERE doc_id = ?;", -1, &st, NULL) != SQLITE_OK)
+        if (sqlite3_prepare_v2(s->db, "DELETE FROM documents WHERE doc_id = ?;", -1, &st, NULL) != SQLITE_OK) {
             rc = LISA_STORE_EIO;
-        else {
+        } else {
             sqlite3_bind_text(st, 1, doc_id, -1, SQLITE_STATIC);
             if (sqlite3_step(st) != SQLITE_DONE) rc = LISA_STORE_EIO;
         }
         sqlite3_finalize(st);
     }
-
-    int64_t change = 0;
-    if (rc == LISA_STORE_OK) rc = meta_get_int(s->db, "change_counter", &change);
-    if (rc == LISA_STORE_OK) rc = meta_set_int(s->db, "change_counter", change + 1);
+    if (rc == LISA_STORE_OK) rc = bump_change(s, &change);
     if (rc == LISA_STORE_OK) rc = exec(s->db, "COMMIT;");
     if (rc != LISA_STORE_OK) {
         rollback(s->db);
-        free(slots);
+        free(freed.v);
         return rc;
     }
-    kill_slots(s, slots, n);
-    s->change = change + 1;
-    if (out_deleted) *out_deleted = n;
-    free(slots);
+    apply_committed(s, &freed, NULL, change, NULL);
+    if (out_deleted) *out_deleted = freed.n;
+    free(freed.v);
     return LISA_STORE_OK;
+}
+
+/* ==== Documents ======================================================== */
+
+static int doc_valid(const lisa_store_doc_t* d) {
+    return d && d->doc_id && d->source_path && d->content_hash && d->status && d->size >= 0;
+}
+
+static int upsert_doc(lisa_store_t* s, const lisa_store_doc_t* d, int64_t chunk_count) {
+    sqlite3_stmt* st = NULL;
+    if (sqlite3_prepare_v2(s->db,
+            "INSERT OR REPLACE INTO documents(doc_id, source_path, content_hash, size,"
+            " mtime_ns, title, chunk_count, status, message)"
+            " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?);", -1, &st, NULL) != SQLITE_OK)
+        return LISA_STORE_EIO;
+    sqlite3_bind_text(st, 1, d->doc_id, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 2, d->source_path, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 3, d->content_hash, -1, SQLITE_STATIC);
+    sqlite3_bind_int64(st, 4, d->size);
+    sqlite3_bind_int64(st, 5, d->mtime_ns);
+    sqlite3_bind_text(st, 6, d->title ? d->title : "", -1, SQLITE_STATIC);
+    sqlite3_bind_int64(st, 7, chunk_count);
+    sqlite3_bind_text(st, 8, d->status, -1, SQLITE_STATIC);
+    sqlite3_bind_text(st, 9, d->message ? d->message : "", -1, SQLITE_STATIC);
+    int rc = sqlite3_step(st) == SQLITE_DONE ? LISA_STORE_OK : LISA_STORE_EIO;
+    sqlite3_finalize(st);
+    return rc;
+}
+
+int lisa_store_replace_doc(lisa_store_t* s, const lisa_store_doc_t* doc, int64_t count,
+                           const float* vectors, const lisa_store_chunk_t* chunks,
+                           uint64_t* out_ids) {
+    if (s == NULL || !doc_valid(doc) || count < 0 ||
+        (count > 0 && (vectors == NULL || chunks == NULL)))
+        return LISA_STORE_EINVAL;
+    if (s->mode != LISA_STORE_WRITE) return LISA_STORE_EREADONLY;
+    for (int64_t i = 0; i < count; i++) {
+        if (!chunk_valid(&chunks[i])) return LISA_STORE_EINVAL;
+    }
+    int rc = exec(s->db, "BEGIN IMMEDIATE;");
+    if (rc != LISA_STORE_OK) return rc;
+    slots_t freed = { NULL, 0, 0 };
+    pending_t pend;
+    int64_t change = 0;
+    rc = delete_doc_rows(s, doc->doc_id, &freed);
+    if (rc == LISA_STORE_OK) rc = insert_rows(s, count, vectors, chunks, doc->doc_id, &pend);
+    if (rc == LISA_STORE_OK) rc = upsert_doc(s, doc, count);
+    if (rc == LISA_STORE_OK) rc = bump_change(s, &change);
+    if (rc == LISA_STORE_OK) rc = exec(s->db, "COMMIT;");
+    if (rc != LISA_STORE_OK) {
+        rollback(s->db);
+        free(freed.v);
+        return rc;
+    }
+    apply_committed(s, &freed, &pend, change, out_ids);
+    free(freed.v);
+    return LISA_STORE_OK;
+}
+
+int lisa_store_doc_touch(lisa_store_t* s, const char* doc_id, int64_t size, int64_t mtime_ns) {
+    if (s == NULL || doc_id == NULL) return LISA_STORE_EINVAL;
+    if (s->mode != LISA_STORE_WRITE) return LISA_STORE_EREADONLY;
+    sqlite3_stmt* st = NULL;
+    if (sqlite3_prepare_v2(s->db, "UPDATE documents SET size = ?, mtime_ns = ? WHERE doc_id = ?;",
+                           -1, &st, NULL) != SQLITE_OK)
+        return LISA_STORE_EIO;
+    sqlite3_bind_int64(st, 1, size);
+    sqlite3_bind_int64(st, 2, mtime_ns);
+    sqlite3_bind_text(st, 3, doc_id, -1, SQLITE_STATIC);
+    int rc = sqlite3_step(st) == SQLITE_DONE ? LISA_STORE_OK : LISA_STORE_EIO;
+    if (rc == LISA_STORE_OK && sqlite3_changes(s->db) == 0) rc = LISA_STORE_ENOTFOUND;
+    sqlite3_finalize(st);
+    return rc;
+}
+
+static int doc_from_row(sqlite3_stmt* st, lisa_store_doc_t* d) {
+    memset(d, 0, sizeof(*d));
+    d->doc_id = xstrdup((const char*)sqlite3_column_text(st, 0));
+    d->source_path = xstrdup((const char*)sqlite3_column_text(st, 1));
+    d->content_hash = xstrdup((const char*)sqlite3_column_text(st, 2));
+    d->size = sqlite3_column_int64(st, 3);
+    d->mtime_ns = sqlite3_column_int64(st, 4);
+    d->title = xstrdup((const char*)sqlite3_column_text(st, 5));
+    d->chunk_count = sqlite3_column_int64(st, 6);
+    d->status = xstrdup((const char*)sqlite3_column_text(st, 7));
+    d->message = xstrdup((const char*)sqlite3_column_text(st, 8));
+    if (!d->doc_id || !d->source_path || !d->content_hash || !d->title || !d->status || !d->message) {
+        lisa_store_doc_free(d);
+        return LISA_STORE_ENOMEM;
+    }
+    return LISA_STORE_OK;
+}
+
+#define DOC_COLUMNS "doc_id, source_path, content_hash, size, mtime_ns, title, chunk_count, status, message"
+
+int lisa_store_doc_get(lisa_store_t* s, const char* doc_id, lisa_store_doc_t* out) {
+    if (s == NULL || doc_id == NULL || out == NULL) return LISA_STORE_EINVAL;
+    memset(out, 0, sizeof(*out));
+    sqlite3_stmt* st = NULL;
+    if (sqlite3_prepare_v2(s->db, "SELECT " DOC_COLUMNS " FROM documents WHERE doc_id = ?;",
+                           -1, &st, NULL) != SQLITE_OK)
+        return LISA_STORE_EIO;
+    sqlite3_bind_text(st, 1, doc_id, -1, SQLITE_STATIC);
+    int rc = sqlite3_step(st) == SQLITE_ROW ? doc_from_row(st, out) : LISA_STORE_ENOTFOUND;
+    sqlite3_finalize(st);
+    return rc;
+}
+
+int lisa_store_doc_list(lisa_store_t* s, const char* path_prefix, lisa_store_doc_fn fn, void* user) {
+    if (s == NULL || fn == NULL) return LISA_STORE_EINVAL;
+    sqlite3_stmt* st = NULL;
+    if (sqlite3_prepare_v2(s->db,
+            "SELECT " DOC_COLUMNS " FROM documents"
+            " WHERE ?1 IS NULL OR substr(source_path, 1, length(?1)) = ?1"
+            " ORDER BY source_path;", -1, &st, NULL) != SQLITE_OK)
+        return LISA_STORE_EIO;
+    if (path_prefix) sqlite3_bind_text(st, 1, path_prefix, -1, SQLITE_STATIC);
+    else sqlite3_bind_null(st, 1);
+    int rc = LISA_STORE_OK;
+    while (rc == LISA_STORE_OK && sqlite3_step(st) == SQLITE_ROW) {
+        lisa_store_doc_t d;
+        rc = doc_from_row(st, &d);
+        if (rc == LISA_STORE_OK) {
+            int stop = fn(user, &d);
+            lisa_store_doc_free(&d);
+            if (stop) break;
+        }
+    }
+    sqlite3_finalize(st);
+    return rc;
+}
+
+void lisa_store_doc_free(lisa_store_doc_t* d) {
+    if (d == NULL) return;
+    free(d->doc_id);
+    free(d->source_path);
+    free(d->content_hash);
+    free(d->title);
+    free(d->status);
+    free(d->message);
+    memset(d, 0, sizeof(*d));
 }
 
 int lisa_store_get(lisa_store_t* s, uint64_t id, lisa_store_chunk_t* out) {
@@ -713,7 +968,7 @@ int lisa_store_get(lisa_store_t* s, uint64_t id, lisa_store_chunk_t* out) {
     sqlite3_stmt* st = NULL;
     if (sqlite3_prepare_v2(s->db,
             "SELECT doc_id, chunk_index, source_path, src_offset, src_length, text,"
-            " content_hash FROM chunks WHERE id = ?;", -1, &st, NULL) != SQLITE_OK)
+            " content_hash, page FROM chunks WHERE id = ?;", -1, &st, NULL) != SQLITE_OK)
         return LISA_STORE_EIO;
     sqlite3_bind_int64(st, 1, (int64_t)id);
     int rc = LISA_STORE_ENOTFOUND;
@@ -725,6 +980,7 @@ int lisa_store_get(lisa_store_t* s, uint64_t id, lisa_store_chunk_t* out) {
         out->length = sqlite3_column_int64(st, 4);
         out->text = xstrdup((const char*)sqlite3_column_text(st, 5));
         out->content_hash = xstrdup((const char*)sqlite3_column_text(st, 6));
+        out->page = sqlite3_column_int64(st, 7);
         rc = (out->doc_id && out->source_path && out->text && out->content_hash)
                  ? LISA_STORE_OK : LISA_STORE_ENOMEM;
         if (rc != LISA_STORE_OK) lisa_store_chunk_free(out);

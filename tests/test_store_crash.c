@@ -110,6 +110,7 @@ static void child(const char* dir, int fd) {
                 c[k].length = 0;
                 c[k].text = (char*)"t";
                 c[k].content_hash = (char*)"h";
+                c[k].page = 0;
             }
             rc = lisa_store_insert(st, BATCH, v, c, NULL);
             break;
@@ -231,7 +232,7 @@ static int trial(const char* scratch, int t, unsigned seed) {
     /* The collection keeps working after recovery. */
     float nv[DIM];
     vec_for(999999, nv);
-    lisa_store_chunk_t nc = { (char*)"after", 0, (char*)"", 0, 0, (char*)"", (char*)"" };
+    lisa_store_chunk_t nc = { (char*)"after", 0, (char*)"", 0, 0, (char*)"", (char*)"", 0 };
     rc = lisa_store_insert(st, 1, nv, &nc, NULL);
     if (rc == LISA_STORE_OK) rc = lisa_store_compact(st);
     lisa_store_close(st);

@@ -38,7 +38,7 @@
 
 #include <stdint.h>
 
-#define LISA_STORE_FORMAT_VERSION 1
+#define LISA_STORE_FORMAT_VERSION 2   /* database format; v1 is migrated on open */
 
 #define LISA_STORE_OK          0
 #define LISA_STORE_EINVAL     -1   /* invalid argument */
@@ -70,6 +70,7 @@ typedef struct {
     int64_t length;        /* byte length of the chunk */
     char*   text;          /* chunk text */
     char*   content_hash;  /* hash of the source document content */
+    int64_t page;          /* 1-based page the chunk starts on; 0 if unpaged */
 } lisa_store_chunk_t;
 
 /* Free the strings of a chunk returned by lisa_store_get. */
@@ -115,8 +116,9 @@ int lisa_store_insert(lisa_store_t* store, int64_t count, const float* vectors,
 int lisa_store_delete(lisa_store_t* store, int64_t count, const uint64_t* ids);
 
 /*
- * Delete every chunk whose doc_id equals doc_id, in one transaction.
- * *out_deleted (if non-NULL) receives the number deleted (may be 0).
+ * Delete every chunk whose doc_id equals doc_id, and the document's
+ * record (if any), in one transaction. *out_deleted (if non-NULL)
+ * receives the number of chunks deleted (may be 0).
  */
 int lisa_store_delete_doc(lisa_store_t* store, const char* doc_id,
                           int64_t* out_deleted);
@@ -166,5 +168,53 @@ int lisa_store_view(lisa_store_t* store, lisa_store_view_t* out);
  */
 int lisa_store_migrate_v1(const char* src_dir, const char* dst_dir,
                           const char* embedding_model);
+
+/* ---- document records (format v2) ------------------------------------ */
+
+/*
+ * What the collection knows about one source document. Used by ingest to
+ * skip unchanged files and to report files that produced no text or
+ * failed. Strings from lisa_store_doc_get / _list are owned by the
+ * record (release with lisa_store_doc_free).
+ */
+typedef struct {
+    char*   doc_id;        /* key; equals the chunks' doc_id */
+    char*   source_path;   /* absolute path of the file */
+    char*   content_hash;  /* hash of the file bytes */
+    int64_t size;          /* bytes, when last indexed or checked */
+    int64_t mtime_ns;      /* modification time, when last indexed or checked */
+    char*   title;         /* "" if none */
+    int64_t chunk_count;   /* chunks stored for this document */
+    char*   status;        /* "ok", "no_text", or "error" */
+    char*   message;       /* detail for "error"; "" otherwise */
+} lisa_store_doc_t;
+
+void lisa_store_doc_free(lisa_store_doc_t* doc);
+
+/*
+ * Replace everything stored for doc->doc_id in one transaction: delete
+ * its old chunks, insert count new chunks (their doc_id is set to
+ * doc->doc_id; count may be 0), and write the document record with
+ * chunk_count = count. A crash leaves either the old or the new version.
+ */
+int lisa_store_replace_doc(lisa_store_t* store, const lisa_store_doc_t* doc, int64_t count,
+                           const float* vectors, const lisa_store_chunk_t* chunks,
+                           uint64_t* out_ids);
+
+/* Update a document's size and mtime (content unchanged). ENOTFOUND if unknown. */
+int lisa_store_doc_touch(lisa_store_t* store, const char* doc_id, int64_t size, int64_t mtime_ns);
+
+/* Read one document record. ENOTFOUND if unknown. */
+int lisa_store_doc_get(lisa_store_t* store, const char* doc_id, lisa_store_doc_t* out);
+
+/* Return non-zero to stop the listing. doc is valid only during the call. */
+typedef int (*lisa_store_doc_fn)(void* user, const lisa_store_doc_t* doc);
+
+/*
+ * Visit document records whose source_path starts with path_prefix (all
+ * records if NULL), ordered by source_path.
+ */
+int lisa_store_doc_list(lisa_store_t* store, const char* path_prefix,
+                        lisa_store_doc_fn fn, void* user);
 
 #endif /* LISA_STORE_H */

@@ -281,6 +281,7 @@ int lisa_collection_add(lisa_collection_t* c, int64_t count, const float* vector
         sc[i].length = chunks[i].length;
         sc[i].text = (char*)chunks[i].text;
         sc[i].content_hash = (char*)chunks[i].content_hash;
+        sc[i].page = 0;
     }
     if (rc == LISA_OK) rc = from_store(lisa_store_insert(c->store, count, vectors, sc, ids));
     audit(c->ctx, LISA_AUDIT_CHUNKS_ADD, rc, NULL, c->path,
