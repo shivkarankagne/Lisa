@@ -27,7 +27,10 @@ jobs:
       matrix:
         config:
           - { name: release,  args: "-DCMAKE_BUILD_TYPE=Release" }
-          - { name: sanitize, args: "-DCMAKE_BUILD_TYPE=Debug -DLISA_SANITIZE=ON" }
+          # Model inference under ASan on CI's CPU-only VMs takes > 30 min;
+          # the sanitizer job runs the model-free tests (models dir absent).
+          # Release runs every model test; inference is sanitizer-tested locally.
+          - { name: sanitize, args: "-DCMAKE_BUILD_TYPE=Debug -DLISA_SANITIZE=ON -DLISA_MODELS_DIR=/nonexistent" }
     steps:
       - uses: actions/checkout@v4
 
@@ -38,12 +41,14 @@ jobs:
           cmake --version
 
       - name: Cache models
+        if: matrix.config.name == 'release'
         uses: actions/cache@v4
         with:
           path: models
           key: models-qwen3-4b-q4km-bc640142-qwen3-emb-06b-q8-370f27d7
 
       - name: Download models (verified)
+        if: matrix.config.name == 'release'
         run: |
           mkdir -p models
           get() {  # repo revision file sha256
