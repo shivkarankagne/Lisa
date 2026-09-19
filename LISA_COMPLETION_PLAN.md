@@ -154,6 +154,7 @@ approve — as one file, with no server stack.
 | 14 | **GUI is part of 1.0.** A web UI (HTML/CSS/JS) is compiled into the binary and served by `lisa serve` on localhost. `lisa gui` opens it in a native window using the OS web view via **webview/webview** (MIT); if no web view is available, it opens the system browser. One codebase works on every platform. No Electron, no Node, no separate app at runtime. |
 
 | 15 | **Source-available core, paid for organizations** (revised 2026-09-19). LISA's code is licensed under the **Business Source License 1.1**: free for individuals' personal use; every organization (company, bank, government, institution, non-profit) needs a commercial license; each version becomes Apache-2.0 / GPL-2.0-or-later four years after release. Paid enterprise features live in a separate private repository (`lisa-enterprise`) and plug in through the extension points in W3 (§2b). *Supersedes the earlier Apache-2.0 open-core decision; licence wording to be reviewed by a lawyer before the repository goes public.* |
+| 16 | **Word files and scanned PDFs are part of 1.0** (decided 2026-09-19, after a real rent agreement — a phone-scanned stamp-paper PDF and .docx drafts — gave "not found"). Moved from §8 L3 into a new package **W5b**: `.docx` text extraction (zip via miniz, MIT) and OCR of PDF pages without a text layer using the OS text recogniser (**Apple Vision** on macOS: no added size, measured 0.4–0.65 s per page, accurate on English print). Vision has no Hindi or Telugu; OCR for Indian scripts (Tesseract) stays in L3. |
 
 ---
 
@@ -388,6 +389,7 @@ engineer. Estimates, not commitments.
 | W3 | Public API `include/lisa.h`: opaque handles, `int64_t` sizes, error codes, ownership rules, semantic version, enterprise extension points as no-ops. | M | W1, W2 |
 | W4 | Models: llama.cpp for generation and embeddings behind `lisa_model` / `lisa_generate` / `lisa_embed`; one default generation model and one embedding model (licenses checked); hardware floor measured. | M | W3 |
 | W5 | Documents: txt, md (md4c), pdf (PDFium, static linking verified first); extractor registry by file type; output = normalised text (utf8proc) + offsets; chunker. | M | W3 |
+| W5b | Documents 2 (decision 16): `.docx`; OCR for PDF pages with no text layer (Apple Vision on macOS; other platforms report "no text" until an engine is added). Behind the extractor registry and a platform OCR function. | S | W5, W10 |
 | W6 | Ingest: folder sync — add new files, re-ingest changed files, remove deleted files (content hash, xxHash); runs as a background job with progress; ingest and ask can run at the same time. | M | W2, W4, W5 |
 | W7 | Retrieval: exact vector search + FTS5 keyword search, fused with RRF; metadata filter hook; behind a `lisa_index` interface. | S | W2 |
 | W8 | Context + answer: retrieve → filter → rank → dedupe → fit token budget → generate; citations with document + offsets; "not found in your documents" when nothing relevant is retrieved; streamed output. | M | W4, W6, W7 |
@@ -601,7 +603,7 @@ Every item plugs into a seam from §7.
 | :--- | :--- | :--- | :--- |
 | L1 | Performance | Benchmark harness v2 (warm-up, ≥ 30 repeats, p50/p95, 10k–1M vectors, dims 384–1024); kernel shoot-out (intrinsics vs assembly vs Accelerate vs ggml, Faiss as baseline); multithreaded search; Metal retrieval; inference tuning (KV cache, quantisation) | Kernel registry |
 | L2 | Answer quality | Reranker; query rewriting; citation verification; follow-up chat; eval set to ≥ 100 questions; multilingual incl. Indian languages | Context pipeline, messages API |
-| L3 | Documents | docx, html, pptx, xlsx; OCR for scanned PDFs (Tesseract, Apache-2.0); email formats | Extractor registry |
+| L3 | Documents | html, pptx, xlsx; OCR for Indian scripts and non-macOS platforms (Tesseract, Apache-2.0); email formats (docx and macOS OCR moved to W5b, decision 16) | Extractor registry |
 | L4 | Scale | Approximate index (USearch / hnswlib) for > 1M chunks, exact search as reranker; compaction tuning; compression (zstd) | `lisa_index` |
 | L5 | Models | Model catalog and verified downloads; embedding model swap with `lisa reindex`; multiple models | Model ID in config / collection |
 | L6 | Robustness | Multi-client concurrency; workload isolation; 24-hour+ soak; fuzzing of every parser | Jobs, one-writer model |

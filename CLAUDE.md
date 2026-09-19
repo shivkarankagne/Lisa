@@ -35,8 +35,11 @@ contributions until a Contributor License Agreement is in place.
 
 ```
 W0 (parallel, anytime)
-W1 → W2 → W3 → W4, W5 (parallel) → W6, W7 → W8 → W9 → W10, W11 → W12
+W1 → W2 → W3 → W4, W5 (parallel) → W6, W7 → W8 → W9 → W10 → W5b, W11 → W12
 ```
+
+W5b (docx + OCR of scanned PDFs) was moved into 1.0 from §8 L3 by the
+user on 2026-09-19 (plan decision 16).
 
 W1–W9 are done (reports `LISA_REPORT_AND_UPDATE_002.md`–`_010.md`);
 next is **W10** (GUI; W11 may run in parallel). Check the plan's acceptance criteria for the package you
@@ -244,6 +247,8 @@ Current:
     src/cli/            `lisa` command line (only lisa.h, src/app, src/http, src/platform)
     src/app/            program layer: data dir, config.json, model lookup, shared JSON
     src/http/           local HTTP API /v1 on CivetWeb (docs/http-api.md)
+    src/gui/            `lisa gui` native window (webview); assets generated from gui/
+    gui/                web UI (plain HTML/CSS/JS, no build step), embedded by cmake/embed_assets.cmake
     include/lisa.h      public API (W3)
     src/api/            lisa.h implementation
     src/models/         model runtime over llama.cpp (only code that includes llama.h)
