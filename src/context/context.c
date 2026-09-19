@@ -16,6 +16,8 @@ static const char k_system[] =
     "Rules:\n"
     "- Use only facts stated in the passages. Never use outside knowledge.\n"
     "- After each fact, cite its passage number in square brackets, like [1].\n"
+    "- If passages disagree (for example two versions of a document), give each answer with its own citation "
+    "and say that they differ.\n"
     "- If the passages do not contain the answer, reply exactly: " CTX_NOT_FOUND_TEXT "\n"
     "- Answer briefly, in the language of the question.";
 

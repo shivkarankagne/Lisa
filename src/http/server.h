@@ -11,6 +11,15 @@
  *   POST /v1/collections/{name}/search           {"query": "...", "topk": 5, "mode": "hybrid"}
  *   POST /v1/collections/{name}/ask              {"messages": [{"role": "user", "content": "..."}],
  *                                                 "stream": false, "topk": 8}
+ *   GET  /v1/settings                            data directory, models, version
+ *   POST /v1/settings                            {"chat_model": "/abs.gguf"} and/or
+ *                                                {"embedding_model": "/abs.gguf"}; known model
+ *                                                files only; applies after a restart
+ *
+ * Static files (the GUI) are served for GET at their paths ("/" is
+ * "/index.html") without the token, with a Content-Security-Policy that
+ * allows only this origin. The token reaches the GUI in the URL fragment,
+ * which browsers never send to the server.
  *
  * With "stream": true, ask answers as Server-Sent Events: `token` events
  * ({"text": "..."}) as the answer is generated, then one `answer` event
@@ -42,11 +51,20 @@
 typedef struct lisa_server lisa_server_t;
 
 typedef struct {
+    const char*          path;   /* e.g. "/index.html" */
+    const char*          mime;
+    const unsigned char* data;
+    size_t               len;
+} server_asset_t;
+
+typedef struct {
     app_t*        app;          /* borrowed; outlives the server */
     int           port;         /* 0: any free port */
     lisa_model_t* chat;         /* borrowed; may be NULL (ask returns 503) */
     lisa_model_t* embed;        /* borrowed; may be NULL (search/ask return 503) */
     const char*   token;        /* NULL: generate one */
+    const server_asset_t* assets;   /* static files; may be NULL */
+    int           n_assets;
 } server_options_t;
 
 /* Start serving. *err (static text) explains a failure. */

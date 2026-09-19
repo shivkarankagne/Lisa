@@ -84,6 +84,48 @@ static char* meta_title(FPDF_DOCUMENT doc) {
     return t;
 }
 
+/* A page with fewer visible characters than this is treated as scanned. */
+#define OCR_MIN_CHARS 16
+/* Render scanned pages at this many pixels on the long side for OCR. */
+#define OCR_LONG_SIDE 2000
+
+static int64_t visible_chars(const char* s, int64_t n) {
+    int64_t k = 0;
+    for (int64_t i = 0; i < n; i++) {
+        unsigned char c = (unsigned char)s[i];
+        if (c > ' ' && (c & 0xC0) != 0x80) k++;   /* count characters, not bytes */
+    }
+    return k;
+}
+
+/*
+ * Recognise the text of a scanned page. No text (OCR unavailable or
+ * nothing found) is not an error: *out stays NULL.
+ */
+static int ocr_page(FPDF_PAGE page, char** out, int64_t* out_len) {
+    *out = NULL;
+    *out_len = 0;
+    double w = FPDF_GetPageWidth(page), h = FPDF_GetPageHeight(page);
+    if (w <= 0 || h <= 0) return DOC_OK;
+    double scale = OCR_LONG_SIDE / (w > h ? w : h);
+    int pw = (int)(w * scale + 0.5), ph = (int)(h * scale + 0.5);
+    FPDF_BITMAP bmp = FPDFBitmap_Create(pw, ph, 0);
+    if (bmp == NULL) return DOC_ENOMEM;
+    FPDFBitmap_FillRect(bmp, 0, 0, pw, ph, 0xFFFFFFFF);
+    FPDF_RenderPageBitmap(bmp, page, 0, 0, pw, ph, 0, FPDF_ANNOT);
+    char* raw = NULL;
+    int rc = lisa_ocr_image((const unsigned char*)FPDFBitmap_GetBuffer(bmp), pw, ph,
+                            FPDFBitmap_GetStride(bmp), &raw);
+    FPDFBitmap_Destroy(bmp);
+    if (rc != LISA_PLAT_OK || raw == NULL) {
+        free(raw);
+        return rc == LISA_PLAT_ENOMEM ? DOC_ENOMEM : DOC_OK;
+    }
+    rc = doc_normalize(raw, (int64_t)strlen(raw), out, out_len);
+    free(raw);
+    return rc;
+}
+
 int doc_extract_pdf(const char* path, doc_text_t* out) {
     int64_t size = lisa_file_size(path);
     if (size == LISA_PLAT_ENOENT) return DOC_ENOTFOUND;
@@ -125,10 +167,25 @@ int doc_extract_pdf(const char* path, doc_text_t* out) {
                 char* pt = NULL;
                 int64_t pl = 0;
                 if (got > 1) rc = utf16_to_doc(u16, got - 1, &pt, &pl);
-                if (rc == DOC_OK && pl > 0) rc = append(&text, &len, &cap, pt, pl);
+                if (rc == DOC_OK && visible_chars(pt, pl) >= OCR_MIN_CHARS)
+                    rc = append(&text, &len, &cap, pt, pl);
+                else if (rc == DOC_OK) {
+                    free(pt);
+                    pt = NULL;
+                    pl = 0;
+                }
                 free(pt);
                 free(u16);
+                if (rc == DOC_OK && pl > 0) n = -1;   /* has a text layer: no OCR */
             }
+        }
+        /* No usable text layer: a scanned page. Recognise it. */
+        if (rc == DOC_OK && n >= 0 && lisa_ocr_available()) {
+            char* ot = NULL;
+            int64_t ol = 0;
+            rc = ocr_page(page, &ot, &ol);
+            if (rc == DOC_OK && ol > 0) rc = append(&text, &len, &cap, ot, ol);
+            free(ot);
         }
         if (tp) FPDFText_ClosePage(tp);
         FPDF_ClosePage(page);

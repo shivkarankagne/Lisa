@@ -30,6 +30,8 @@ static app_t g_app;
 static lisa_server_t* g_srv;       /* no models */
 static int g_port;
 static char g_body[1 << 16];
+static char g_csp[512];      /* Content-Security-Policy of the last response */
+static char g_type[128];     /* Content-Type of the last response */
 
 void setUp(void) {}
 void tearDown(void) {}
@@ -55,7 +57,15 @@ static int http_at(int port, const char* method, const char* path, const char* e
         snprintf(g_body, sizeof(g_body), "connect failed: %s", ebuf);
         return -1;
     }
-    int status = mg_get_response_info(c)->status_code;
+    const struct mg_response_info* ri = mg_get_response_info(c);
+    int status = ri->status_code;
+    g_csp[0] = g_type[0] = '\0';
+    for (int i = 0; i < ri->num_headers; i++) {
+        if (strcmp(ri->http_headers[i].name, "Content-Security-Policy") == 0)
+            snprintf(g_csp, sizeof(g_csp), "%s", ri->http_headers[i].value);
+        if (strcmp(ri->http_headers[i].name, "Content-Type") == 0)
+            snprintf(g_type, sizeof(g_type), "%s", ri->http_headers[i].value);
+    }
     size_t len = 0;
     int n;
     while (len + 1 < sizeof(g_body) && (n = mg_read(c, g_body + len, sizeof(g_body) - 1 - len)) > 0)
@@ -171,7 +181,7 @@ static void test_body_limit(void) {
 static void test_start_errors_and_generated_token(void) {
     lisa_server_t* s = NULL;
     const char* err = NULL;
-    server_options_t o = { &g_app, g_port, NULL, NULL, TOKEN };
+    server_options_t o = { &g_app, g_port, NULL, NULL, TOKEN, NULL, 0 };
     TEST_ASSERT_NOT_EQUAL(LISA_OK, server_start(&o, &s, &err));   /* port in use */
     TEST_ASSERT_NULL(s);
     o.port = 0;
@@ -232,7 +242,7 @@ static void test_extension_points(void) {
     g_app.ctx = g_ext_ctx;
 
     lisa_server_t* s = NULL;
-    server_options_t o = { &g_app, 0, NULL, NULL, TOKEN };
+    server_options_t o = { &g_app, 0, NULL, NULL, TOKEN, NULL, 0 };
     TEST_ASSERT_EQUAL_INT(LISA_OK, server_start(&o, &s, NULL));
     int port = server_port(s);
     char h[64];
@@ -253,6 +263,59 @@ static void test_extension_points(void) {
     lisa_context_destroy(g_ext_ctx);
 }
 
+static const unsigned char k_index[] = "<!doctype html><title>t</title>";
+static const unsigned char k_js[] = "console.log(1);";
+static const server_asset_t k_assets[] = {
+    { "/index.html", "text/html; charset=utf-8", k_index, sizeof(k_index) - 1 },
+    { "/app.js", "text/javascript; charset=utf-8", k_js, sizeof(k_js) - 1 },
+};
+
+static void test_static_files_and_settings(void) {
+    lisa_server_t* s = NULL;
+    server_options_t o = { &g_app, 0, NULL, NULL, TOKEN, k_assets, 2 };
+    TEST_ASSERT_EQUAL_INT(LISA_OK, server_start(&o, &s, NULL));
+    int port = server_port(s);
+    char h[64];
+    snprintf(h, sizeof(h), "Host: 127.0.0.1:%d\r\n", port);
+
+    /* Static files need no token, carry a strict CSP, and "/" is index.html. */
+    TEST_ASSERT_EQUAL_INT(200, http_at(port, "GET", "/", h, 0, NULL));
+    TEST_ASSERT_EQUAL_STRING("<!doctype html><title>t</title>", g_body);
+    TEST_ASSERT_EQUAL_STRING("text/html; charset=utf-8", g_type);
+    TEST_ASSERT_NOT_NULL(strstr(g_csp, "default-src 'none'"));
+    TEST_ASSERT_NOT_NULL(strstr(g_csp, "connect-src 'self'"));
+    TEST_ASSERT_NOT_NULL(strstr(g_csp, "frame-ancestors 'none'"));
+    TEST_ASSERT_EQUAL_INT(200, http_at(port, "GET", "/app.js", h, 0, NULL));
+    TEST_ASSERT_EQUAL_STRING("text/javascript; charset=utf-8", g_type);
+    /* Not a file: the API rules apply (token first). */
+    TEST_ASSERT_EQUAL_INT(401, http_at(port, "GET", "/favicon.ico", h, 0, NULL));
+    TEST_ASSERT_EQUAL_INT(401, http_at(port, "POST", "/", h, 0, "{}"));
+    /* Host and Origin are still checked for static files. */
+    TEST_ASSERT_EQUAL_INT(403, http_at(port, "GET", "/", "Host: evil.example\r\n", 0, NULL));
+
+    /* Settings. */
+    char b[1024];
+    TEST_ASSERT_EQUAL_INT(401, http_at(port, "GET", "/v1/settings", h, 0, NULL));
+    TEST_ASSERT_EQUAL_INT(200, http_at(port, "GET", "/v1/settings", h, 1, NULL));
+    TEST_ASSERT_EQUAL_STRING(g_app.data_dir, field("data_dir", b, sizeof(b)));
+    TEST_ASSERT_EQUAL_STRING(LISA_VERSION_STRING, field("version", b, sizeof(b)));
+    TEST_ASSERT_EQUAL_STRING("false", field("models.chat.loaded", b, sizeof(b)));
+    TEST_ASSERT_EQUAL_INT(400, http_at(port, "POST", "/v1/settings", h, 1, "{}"));
+    TEST_ASSERT_EQUAL_INT(400, http_at(port, "POST", "/v1/settings", h, 1, "{\"chat_model\":\"relative.gguf\"}"));
+    TEST_ASSERT_EQUAL_INT(400, http_at(port, "POST", "/v1/settings", h, 1, "{\"chat_model\":\"/no/such.gguf\"}"));
+    TEST_ASSERT_EQUAL_INT(405, http_at(port, "DELETE", "/v1/settings", h, 1, NULL));
+    if (g_have_models) {
+        char body[1200];
+        /* The embedding model is not a chat model. */
+        snprintf(body, sizeof(body), "{\"chat_model\":\"%s/Qwen3-Embedding-0.6B-Q8_0.gguf\"}", g_models);
+        TEST_ASSERT_EQUAL_INT(400, http_at(port, "POST", "/v1/settings", h, 1, body));
+        snprintf(body, sizeof(body), "{\"chat_model\":\"%s/Qwen3-4B-Q4_K_M.gguf\"}", g_models);
+        TEST_ASSERT_EQUAL_INT(200, http_at(port, "POST", "/v1/settings", h, 1, body));
+        TEST_ASSERT_EQUAL_STRING("true", field("restart_required", b, sizeof(b)));
+    }
+    server_stop(s);
+}
+
 /* ---- with models ------------------------------------------------------- */
 
 #define NEED_MODELS() do { if (!g_have_models) TEST_IGNORE_MESSAGE("models not present"); } while (0)
@@ -263,7 +326,7 @@ static void test_ingest_search_ask(void) {
     TEST_ASSERT_EQUAL_INT(LISA_OK, app_load_model(&g_app, APP_MODEL_EMBEDDING, &embed, NULL));
     TEST_ASSERT_EQUAL_INT(LISA_OK, app_load_model(&g_app, APP_MODEL_CHAT, &chat, NULL));
     lisa_server_t* s = NULL;
-    server_options_t o = { &g_app, 0, chat, embed, TOKEN };
+    server_options_t o = { &g_app, 0, chat, embed, TOKEN, NULL, 0 };
     TEST_ASSERT_EQUAL_INT(LISA_OK, server_start(&o, &s, NULL));
     int saved_port = g_port;
     g_port = server_port(s);
@@ -336,7 +399,8 @@ int main(int argc, char** argv) {
     if (!realpath(argv[1], scratch) || !realpath(argv[2], fixtures)) return 2;
     g_scratch = scratch;
     g_fixtures = fixtures;
-    g_models = argv[3];
+    static char models[1024];
+    g_models = realpath(argv[3], models) ? models : argv[3];
     char data[800];
     snprintf(data, sizeof(data), "%s/http_data_%d", g_scratch, (int)getpid());
     if (app_open(&g_app, data, NULL) != LISA_OK) return 1;
@@ -350,7 +414,7 @@ int main(int argc, char** argv) {
                           app_set_model(&g_app, APP_MODEL_CHAT, c) != LISA_OK))
         return 1;
 
-    server_options_t o = { &g_app, 0, NULL, NULL, TOKEN };
+    server_options_t o = { &g_app, 0, NULL, NULL, TOKEN, NULL, 0 };
     const char* err = NULL;
     if (server_start(&o, &g_srv, &err) != LISA_OK) {
         fprintf(stderr, "server_start: %s\n", err);
@@ -365,6 +429,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_body_limit);
     RUN_TEST(test_start_errors_and_generated_token);
     RUN_TEST(test_extension_points);
+    RUN_TEST(test_static_files_and_settings);
     RUN_TEST(test_ingest_search_ask);
     int failures = UNITY_END();
     server_stop(g_srv);

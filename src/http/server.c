@@ -56,6 +56,8 @@ struct lisa_server {
     int64_t            n_jobs, cap_jobs, next_id;
     lisa_thread_t*     worker;
     lisa_model_t*      ingest_embed;     /* worker's own embedding model */
+    const server_asset_t* assets;
+    int                n_assets;
     volatile int       stop;
 };
 
@@ -582,6 +584,104 @@ static int h_ask(lisa_server_t* s, struct mg_connection* conn, const char* name,
     return result;
 }
 
+static void model_json(lisa_server_t* s, yyjson_mut_doc* doc, yyjson_mut_val* o, app_model_kind kind,
+                       int loaded) {
+    const char* source = NULL;
+    char* path = app_find_model(s->app, kind, &source);
+    if (path) yyjson_mut_obj_add_strcpy(doc, o, "path", path);
+    else yyjson_mut_obj_add_null(doc, o, "path");
+    yyjson_mut_obj_add_bool(doc, o, "loaded", loaded != 0);
+    if (source) yyjson_mut_obj_add_str(doc, o, "source", source);
+    free(path);
+}
+
+static int h_settings_get(lisa_server_t* s, struct mg_connection* conn) {
+    yyjson_mut_doc* doc = yyjson_mut_doc_new(NULL);
+    yyjson_mut_val* root = yyjson_mut_obj(doc);
+    yyjson_mut_doc_set_root(doc, root);
+    yyjson_mut_obj_add_str(doc, root, "version", lisa_version(NULL, NULL, NULL));
+    yyjson_mut_obj_add_strcpy(doc, root, "data_dir", s->app->data_dir);
+    yyjson_mut_val* m = yyjson_mut_obj_add_obj(doc, root, "models");
+    model_json(s, doc, yyjson_mut_obj_add_obj(doc, m, "chat"), APP_MODEL_CHAT, s->chat != NULL);
+    model_json(s, doc, yyjson_mut_obj_add_obj(doc, m, "embedding"), APP_MODEL_EMBEDDING, s->embed != NULL);
+    return send_doc(conn, 200, doc);
+}
+
+/*
+ * The known model this file is, judged by exact file name and size (fast;
+ * hashing a multi-GB file does not belong in a request). `lisa model`
+ * verifies the full SHA-256.
+ */
+static int known_by_name_and_size(const char* path, lisa_known_model_t* out) {
+    const char* base = strrchr(path, '/');
+    base = base ? base + 1 : path;
+    int64_t size = lisa_file_size(path);
+    if (size < 0) return LISA_E_NOT_FOUND;
+    int64_t n = lisa_known_model_count();
+    for (int64_t i = 0; i < n; i++) {
+        if (lisa_known_model(i, out) == LISA_OK && out->file_size == size && strcmp(out->file_name, base) == 0)
+            return LISA_OK;
+    }
+    return LISA_E_UNSUPPORTED;
+}
+
+static int h_settings_post(lisa_server_t* s, struct mg_connection* conn) {
+    int status = 0;
+    yyjson_doc* doc = read_json(conn, &status);
+    if (doc == NULL) return status;
+    yyjson_val* root = yyjson_doc_get_root(doc);
+    static const char* const keys[2] = { "chat_model", "embedding_model" };
+    const char* bad = NULL;
+    int changed = 0;
+    for (int k = 0; k < 2 && bad == NULL; k++) {
+        yyjson_val* v = yyjson_obj_get(root, keys[k]);
+        if (v == NULL) continue;
+        const char* p = yyjson_get_str(v);
+        lisa_known_model_t km;
+        if (p == NULL || p[0] != '/') bad = "model paths must be absolute";
+        else if (known_by_name_and_size(p, &km) != LISA_OK)
+            bad = "not a known model file (unknown files can be set with `lisa model --set`)";
+        else if ((km.is_embedding != 0) != (k == APP_MODEL_EMBEDDING))
+            bad = k == APP_MODEL_CHAT ? "that is an embedding model" : "that is not an embedding model";
+        else if (app_set_model(s->app, (app_model_kind)k, p) != LISA_OK)
+            bad = "cannot write config.json";
+        else changed++;
+    }
+    yyjson_doc_free(doc);
+    if (bad) return send_error(conn, 400, "invalid_argument", bad);
+    if (changed == 0) return send_error(conn, 400, "invalid_argument", "give chat_model and/or embedding_model");
+    yyjson_mut_doc* out = yyjson_mut_doc_new(NULL);
+    yyjson_mut_val* oroot = yyjson_mut_obj(out);
+    yyjson_mut_doc_set_root(out, oroot);
+    yyjson_mut_obj_add_bool(out, oroot, "restart_required", true);
+    return send_doc(conn, 200, out);
+}
+
+/* Built-in static files (the GUI). Returns 0 if path is not one. */
+static int h_static(lisa_server_t* s, struct mg_connection* conn, const char* path) {
+    if (strcmp(path, "/") == 0) path = "/index.html";
+    for (int i = 0; i < s->n_assets; i++) {
+        const server_asset_t* a = &s->assets[i];
+        if (strcmp(a->path, path) != 0) continue;
+        mg_printf(conn,
+                  "HTTP/1.1 200 OK\r\n"
+                  "Content-Type: %s\r\n"
+                  "Content-Length: %zu\r\n"
+                  "Cache-Control: no-store\r\n"
+                  "X-Content-Type-Options: nosniff\r\n"
+                  "X-Frame-Options: DENY\r\n"
+                  "Referrer-Policy: no-referrer\r\n"
+                  "Content-Security-Policy: default-src 'none'; script-src 'self'; style-src 'self'; "
+                  "img-src 'self' data:; connect-src 'self'; font-src 'self'; base-uri 'none'; "
+                  "form-action 'none'; frame-ancestors 'none'\r\n"
+                  "\r\n",
+                  a->mime, a->len);
+        mg_write(conn, a->data, a->len);
+        return 200;
+    }
+    return 0;
+}
+
 /* Offer a request the core does not handle to the routes extension. */
 static int h_extension(lisa_server_t* s, struct mg_connection* conn, const char* method,
                        const char* path, const lisa_principal_t* principal) {
@@ -628,6 +728,10 @@ static int route(struct mg_connection* conn, void* cbdata) {
 
     int is_health = strcmp(path, "/v1/health") == 0;
     if (is_health && strcmp(method, "GET") == 0) return h_health(s, conn);
+    if (strcmp(method, "GET") == 0 && strncmp(path, "/v1/", 4) != 0) {
+        int st = h_static(s, conn, path);
+        if (st) return st;
+    }
 
     const char* auth = mg_get_header(conn, "Authorization");
     if (auth == NULL || strncmp(auth, "Bearer ", 7) != 0 || !token_ok(auth + 7, s->token))
@@ -655,7 +759,11 @@ static int route(struct mg_connection* conn, void* cbdata) {
     int result;
     char name[APP_NAME_MAX + 2];
     const char* rest = NULL;
-    if (strcmp(path, "/v1/collections") == 0) {
+    if (strcmp(path, "/v1/settings") == 0) {
+        result = strcmp(method, "GET") == 0    ? h_settings_get(s, conn)
+                 : strcmp(method, "POST") == 0 ? h_settings_post(s, conn)
+                                               : send_error(conn, 405, "method_not_allowed", "use GET or POST");
+    } else if (strcmp(path, "/v1/collections") == 0) {
         result = strcmp(method, "GET") == 0 ? h_collections(s, conn)
                                             : send_error(conn, 405, "method_not_allowed", "use GET");
     } else if (strncmp(path, "/v1/jobs/", 9) == 0) {
@@ -770,6 +878,8 @@ int server_start(const server_options_t* opts, lisa_server_t** out, const char**
     s->app = opts->app;
     s->chat = opts->chat;
     s->embed = opts->embed;
+    s->assets = opts->assets;
+    s->n_assets = opts->assets ? opts->n_assets : 0;
 
     if (opts->token) {
         if (strlen(opts->token) < 16 || strlen(opts->token) > SERVER_TOKEN_LEN) {

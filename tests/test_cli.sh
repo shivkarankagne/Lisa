@@ -48,7 +48,7 @@ rc "bad --topk" 1 "$BIN" search --data "$DATA" --collection c --query x --topk 0
 rc "ask without a question" 1 "$BIN" ask --data "$DATA" --collection c
 rc "ingest without paths" 1 "$BIN" ingest --data "$DATA" --collection c
 rc "ingest missing path" 2 "$BIN" ingest --data "$DATA" --collection c "$WORK/nope"
-rc "gui not yet available" 5 "$BIN" gui --data "$DATA"
+# `lisa gui` opens a window, so it is tested by test_gui (headless Chrome), not here.
 [ -d "$DATA/collections" ] && ok "data dir and collections/ created" || bad "data dir not created"
 
 # migrate a LISA 0.1 collection

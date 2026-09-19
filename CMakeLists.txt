@@ -13,7 +13,7 @@
 #   ctest --test-dir build-asan --output-on-failure
 
 cmake_minimum_required(VERSION 3.20)
-project(lisa VERSION 0.5.0 LANGUAGES C CXX ASM)
+project(lisa VERSION 0.6.0 LANGUAGES C CXX ASM OBJC)
 
 option(LISA_SANITIZE         "Build with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
 option(LISA_BUILD_TESTS      "Build tests"      ON)
@@ -97,6 +97,12 @@ add_library(lisa_md4c STATIC third_party/md4c/md4c.c)
 target_include_directories(lisa_md4c PUBLIC third_party/md4c)
 target_compile_options(lisa_md4c PRIVATE -w)
 
+# miniz (third_party/miniz/INTAKE.md): reads .docx (zip) files.
+add_library(lisa_miniz STATIC third_party/miniz/miniz.c)
+target_include_directories(lisa_miniz PUBLIC third_party/miniz)
+target_compile_definitions(lisa_miniz PUBLIC MINIZ_NO_ARCHIVE_WRITING_APIS MINIZ_NO_ZLIB_COMPATIBLE_NAMES)
+target_compile_options(lisa_miniz PRIVATE -w)
+
 add_library(lisa_yyjson STATIC third_party/yyjson/yyjson.c)
 target_include_directories(lisa_yyjson PUBLIC third_party/yyjson)
 target_compile_options(lisa_yyjson PRIVATE -w)
@@ -159,6 +165,7 @@ add_library(lisa_core STATIC
     src/documents/documents.c
     src/documents/markdown.c
     src/documents/chunk.c
+    src/documents/docx.c
     src/ingest/ingest.c
     src/platform/platform_posix.c
     src/kernels/registry.c
@@ -177,7 +184,12 @@ add_library(lisa_core STATIC
     src/kernels/arm64/lisa_ultra_mac.s
 )
 target_include_directories(lisa_core PUBLIC include src)
-target_link_libraries(lisa_core PUBLIC lisa_sqlite m PRIVATE llama vendor::hash lisa_md4c lisa_utf8proc)
+target_link_libraries(lisa_core PUBLIC lisa_sqlite m PRIVATE llama vendor::hash lisa_md4c lisa_utf8proc lisa_miniz)
+if(APPLE)
+    target_sources(lisa_core PRIVATE src/platform/platform_macos.m)
+    set_source_files_properties(src/platform/platform_macos.m PROPERTIES COMPILE_OPTIONS "-fno-objc-arc")
+    target_link_libraries(lisa_core PUBLIC "-framework Cocoa" "-framework Vision")
+endif()
 if(LISA_HAVE_PDFIUM)
     target_sources(lisa_core PRIVATE src/documents/pdf.c)
     target_compile_definitions(lisa_core PRIVATE LISA_HAVE_PDFIUM)
@@ -195,8 +207,25 @@ add_library(lisa_app STATIC
 )
 target_link_libraries(lisa_app PUBLIC lisa_core lisa_yyjson lisa_civetweb)
 
+# The GUI (gui/): its files are compiled into the binary, and on macOS
+# `lisa gui` shows them in a native window (webview).
+set(LISA_GUI_FILES ${CMAKE_SOURCE_DIR}/gui/index.html ${CMAKE_SOURCE_DIR}/gui/app.css ${CMAKE_SOURCE_DIR}/gui/app.js)
+add_custom_command(
+    OUTPUT ${CMAKE_BINARY_DIR}/gui_assets.c
+    COMMAND ${CMAKE_COMMAND} -DOUT=${CMAKE_BINARY_DIR}/gui_assets.c -DSRC=${CMAKE_SOURCE_DIR}/gui
+            -P ${CMAKE_SOURCE_DIR}/cmake/embed_assets.cmake
+    DEPENDS ${LISA_GUI_FILES} ${CMAKE_SOURCE_DIR}/cmake/embed_assets.cmake
+    COMMENT "Embedding GUI files"
+    VERBATIM)
+add_library(lisa_gui STATIC ${CMAKE_BINARY_DIR}/gui_assets.c src/gui/window.c)
+target_link_libraries(lisa_gui PUBLIC lisa_app)
+if(APPLE)
+    target_link_libraries(lisa_gui PUBLIC lisa_webview)
+    target_compile_definitions(lisa_gui PRIVATE LISA_HAVE_WEBVIEW)
+endif()
+
 add_executable(lisa src/cli/main.c)
-target_link_libraries(lisa PRIVATE lisa_app)
+target_link_libraries(lisa PRIVATE lisa_gui)
 
 # ---- tests -------------------------------------------------------------
 
@@ -339,6 +368,17 @@ if(LISA_BUILD_TESTS)
         # Same llama.cpp false positive as test_ask (see there).
         set_tests_properties(test_cli PROPERTIES ENVIRONMENT
             "LISA_BIN=$<TARGET_FILE:lisa>;LISA_TEST_INDEX=${LISA_TESTDATA}/vectors_768.bin;LISA_BUILD_COLLECTION=$<TARGET_FILE:build_collection>;LISA_MODELS=${LISA_MODELS_DIR};LISA_FIXTURES=${CMAKE_SOURCE_DIR}/tests/fixtures;ASAN_OPTIONS=detect_container_overflow=0")
+    endif()
+
+    # The GUI in headless Chrome; skipped (77) where Node or Chrome is missing.
+    add_test(NAME test_gui COMMAND bash ${CMAKE_SOURCE_DIR}/tests/test_gui.sh)
+    set_tests_properties(test_gui PROPERTIES
+        TIMEOUT 1800
+        SKIP_RETURN_CODE 77
+        ENVIRONMENT "LISA_BIN=$<TARGET_FILE:lisa>;LISA_MODELS=${LISA_MODELS_DIR};LISA_FIXTURES=${CMAKE_SOURCE_DIR}/tests/fixtures")
+    if(LISA_SANITIZE)
+        set_tests_properties(test_gui PROPERTIES ENVIRONMENT
+            "LISA_BIN=$<TARGET_FILE:lisa>;LISA_MODELS=${LISA_MODELS_DIR};LISA_FIXTURES=${CMAKE_SOURCE_DIR}/tests/fixtures;ASAN_OPTIONS=detect_container_overflow=0")
     endif()
 endif()
 

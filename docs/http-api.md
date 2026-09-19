@@ -17,6 +17,13 @@ within `/v1` are additive only.
 - Collection names are `[A-Za-z0-9_-]{1,64}` and resolve under the data
   directory only.
 - Request bodies are limited to 1 MiB.
+- The GUI's own files (`/`, `/app.js`, `/app.css`) are served without
+  the token, with `Content-Security-Policy: default-src 'none';
+  script-src 'self'; style-src 'self'; connect-src 'self'; ...` and
+  `X-Frame-Options: DENY`: the page can talk only to this server. `lisa
+  gui` hands the page the token in the URL fragment (`/#token=...`),
+  which browsers never send over the network; the page keeps it for the
+  tab and removes it from the address bar.
 
 ## Errors
 
@@ -37,7 +44,22 @@ within `/v1` are additive only.
 
 ### `GET /v1/health`
 
-    {"status": "ok", "version": "0.5.0", "models": {"chat": true, "embedding": true}}
+    {"status": "ok", "version": "0.6.0", "models": {"chat": true, "embedding": true}}
+
+### `GET /v1/settings`  (since 0.6)
+
+    {"version": "0.6.0", "data_dir": "/Users/me/Library/Application Support/LISA",
+     "models": {"chat": {"path": "/.../Qwen3-4B-Q4_K_M.gguf", "loaded": true, "source": "search"},
+                "embedding": {"path": "/.../Qwen3-Embedding-0.6B-Q8_0.gguf", "loaded": true, "source": "config"}}}
+
+### `POST /v1/settings`  (since 0.6)
+
+    {"chat_model": "/abs/path.gguf", "embedding_model": "/abs/path.gguf"}
+
+Either or both. Only known model files (`docs/models.md`) of the right
+kind, recognised by exact file name and size (`lisa model` verifies the
+full SHA-256); others are set with `lisa model --set`. Saved to `config.json`;
+applies the next time LISA starts: `{"restart_required": true}`.
 
 ### `GET /v1/collections`
 

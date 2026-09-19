@@ -54,7 +54,7 @@ typedef struct {
 static int read_options(const lisa_ask_options_t* in, ask_opts_t* o) {
     o->top_k = 8;
     o->budget = 1100;
-    o->min_similarity = 0.40f;
+    o->min_similarity = 0.25f;
     o->max_tokens = 512;
     o->temperature = 0.0f;
     o->on_token = NULL;

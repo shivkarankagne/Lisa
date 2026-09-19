@@ -4,7 +4,7 @@
     lisa search  [--data <dir>] --collection <name> --query "<text>" [--topk N]
     lisa ask     [--data <dir>] --collection <name> [--topk N] "<question>"
     lisa serve   [--data <dir>] [--port <port>] [--token <token>]
-    lisa gui     [--data <dir>]                       (arrives with W10)
+    lisa gui     [--data <dir>] [--port <port>] [--browser]
     lisa model   [--data <dir>] [--set <file.gguf>]
     lisa migrate --from <v1-dir> --to <dir> [--model <id>]
     lisa --version | --help
@@ -45,6 +45,10 @@ against the known models).
 - **ask** streams an answer from the collection with numbered citations,
   then lists the sources. If the documents do not contain the answer it
   says "I could not find this in your documents."
+- **gui** opens LISA in its own window (macOS; `--browser` or other
+  systems: the default browser). Add folders (type a path, "Choose…",
+  or drop a folder on the window), ask, click a citation to read the
+  passage, change models in Settings. Close the window to quit.
 - **serve** runs the local HTTP API (`docs/http-api.md`) on 127.0.0.1
   and prints a session token. Ctrl-C stops it.
 - **migrate** converts a LISA 0.1 collection (`header.bin` +
@@ -60,5 +64,5 @@ against the known models).
 | 2 | collection, file, or model not found |
 | 3 | wrong or mismatched model |
 | 4 | collection in use by another writer |
-| 5 | any other error (including `gui` before W10) |
+| 5 | any other error |
 | 130 | interrupted with Ctrl-C |

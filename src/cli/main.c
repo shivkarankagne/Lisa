@@ -14,6 +14,7 @@
 #include "yyjson.h"
 #include "../app/app.h"
 #include "../app/app_json.h"
+#include "../gui/gui.h"
 #include "../http/server.h"
 #include "../platform/platform.h"
 
@@ -32,7 +33,7 @@ static const char k_usage[] =
     "  lisa search  [--data <dir>] --collection <name> --query \"<text>\" [--topk N]\n"
     "  lisa ask     [--data <dir>] --collection <name> [--topk N] \"<question>\"\n"
     "  lisa serve   [--data <dir>] [--port <port>]                  local HTTP API\n"
-    "  lisa gui     [--data <dir>]\n"
+    "  lisa gui     [--data <dir>] [--port <port>] [--browser]      desktop window\n"
     "  lisa model   [--data <dir>] [--set <file.gguf>]              show or set models\n"
     "  lisa migrate --from <v1-dir> --to <dir> [--model <id>]       convert a LISA 0.1 collection\n"
     "  lisa --version\n"
@@ -72,6 +73,7 @@ typedef struct {
     int64_t     topk;
     int         port;
     int         json;
+    int         browser;
     const char* pos[256];
     int         n_pos;
 } args_t;
@@ -93,6 +95,7 @@ static int parse_args(int argc, char** argv, args_t* a) {
         const char* s = argv[i];
         const char** slot = NULL;
         if (strcmp(s, "--json") == 0) { a->json = 1; continue; }
+        if (strcmp(s, "--browser") == 0) { a->browser = 1; continue; }
         if (strcmp(s, "--data") == 0) slot = &a->data;
         else if (strcmp(s, "--collection") == 0) slot = &a->collection;
         else if (strcmp(s, "--query") == 0) slot = &a->query;
@@ -313,6 +316,8 @@ static int cmd_search(app_t* app, const args_t* a) {
             yyjson_mut_val* o = yyjson_mut_arr_add_obj(doc, arr);
             yyjson_mut_obj_add_uint(doc, o, "id", hits[i].id);
             yyjson_mut_obj_add_real(doc, o, "score", hits[i].score);
+            if (hits[i].distance >= 0)   /* unit vectors: cosine = 1 - d/2 */
+                yyjson_mut_obj_add_real(doc, o, "similarity", 1.0 - hits[i].distance / 2.0);
             yyjson_mut_obj_add_strcpy(doc, o, "path", ch->source_path);
             yyjson_mut_obj_add_int(doc, o, "page", ch->page);
             yyjson_mut_obj_add_int(doc, o, "offset", ch->offset);
@@ -356,6 +361,12 @@ static int cmd_ask(app_t* app, const args_t* a) {
     }
     lisa_answer_t* ans = NULL;
     if (rc == LISA_OK) {
+        lisa_collection_info_t info = LISA_COLLECTION_INFO_INIT;
+        if (lisa_collection_info(c, &info) == LISA_OK && info.chunk_count == 0)
+            fprintf(stderr, "lisa: note: '%s' has no readable text yet (scanned pages and unsupported "
+                            "files are skipped), so nothing can be found in it.\n", a->collection);
+    }
+    if (rc == LISA_OK) {
         lisa_message_t m = { "user", a->pos[0] };
         rc = lisa_ask(c, embed, chat, &m, 1, &o, &ans);
         if (rc == LISA_E_MODEL_MISMATCH) err = "the collection was built with a different embedding model";
@@ -386,23 +397,37 @@ static int cmd_ask(app_t* app, const args_t* a) {
 
 /* ---- serve / gui ----------------------------------------------------------- */
 
+/* Load what models exist, start the server with the GUI files. */
+static int start_server(app_t* app, const args_t* a, int gui, lisa_model_t** embed, lisa_model_t** chat,
+                        lisa_server_t** srv, const char** err) {
+    *embed = *chat = NULL;
+    const char* why = NULL;
+    if (app_load_model(app, APP_MODEL_EMBEDDING, embed, &why) != LISA_OK)
+        fprintf(stderr, "lisa: warning: %s; search and ask are unavailable\n", why);
+    if (app_load_model(app, APP_MODEL_CHAT, chat, &why) != LISA_OK)
+        fprintf(stderr, "lisa: warning: %s; ask is unavailable\n", why);
+    server_options_t so = { app, a->port, *chat, *embed, a->token, lisa_gui_assets, lisa_gui_asset_count };
+    int rc = server_start(&so, srv, err);
+    if (rc != LISA_OK && gui && a->port == SERVER_DEFAULT_PORT) {
+        so.port = 0;   /* the default port is taken: any free port will do for the window */
+        rc = server_start(&so, srv, err);
+    }
+    return rc;
+}
+
 static int cmd_serve(app_t* app, const args_t* a) {
     const char* err = NULL;
-    lisa_model_t *embed = NULL, *chat = NULL;
-    if (app_load_model(app, APP_MODEL_EMBEDDING, &embed, &err) != LISA_OK)
-        fprintf(stderr, "lisa: warning: %s; search and ask are unavailable\n", err);
-    if (app_load_model(app, APP_MODEL_CHAT, &chat, &err) != LISA_OK)
-        fprintf(stderr, "lisa: warning: %s; ask is unavailable\n", err);
-
-    server_options_t so = { app, a->port, chat, embed, a->token };
+    lisa_model_t *embed, *chat;
     lisa_server_t* srv = NULL;
     lisa_stop_signals_install();
-    int rc = server_start(&so, &srv, &err);
+    int rc = start_server(app, a, 0, &embed, &chat, &srv, &err);
     if (rc == LISA_OK) {
         printf("LISA %s serving http://127.0.0.1:%d/v1 (local only)\n", lisa_version(NULL, NULL, NULL),
                server_port(srv));
         printf("Session token: %s\n", server_token(srv));
-        printf("Send it as 'Authorization: Bearer <token>'. Ctrl-C stops the server.\n");
+        printf("Send it as 'Authorization: Bearer <token>'. GUI: http://127.0.0.1:%d/#token=%s\n",
+               server_port(srv), server_token(srv));
+        printf("Ctrl-C stops the server.\n");
         fflush(stdout);
         while (!lisa_stop_requested()) lisa_sleep_ms(200);
         printf("Stopping...\n");
@@ -411,6 +436,36 @@ static int cmd_serve(app_t* app, const args_t* a) {
     lisa_model_free(chat);
     lisa_model_free(embed);
     return rc == LISA_OK ? EXIT_OK : fail(rc, "serve", err);
+}
+
+static int cmd_gui(app_t* app, const args_t* a) {
+    const char* err = NULL;
+    lisa_model_t *embed, *chat;
+    lisa_server_t* srv = NULL;
+    lisa_stop_signals_install();
+    int rc = start_server(app, a, 1, &embed, &chat, &srv, &err);
+    if (rc == LISA_OK) {
+        char url[256];
+        snprintf(url, sizeof(url), "http://127.0.0.1:%d/#token=%s", server_port(srv), server_token(srv));
+        int use_browser = a->browser || !gui_native_available();
+        if (!use_browser) {
+            fprintf(stderr, "LISA is open in its window. Close the window (or press Ctrl-C) to quit.\n");
+            if (gui_show_window(url) != 0) {
+                fprintf(stderr, "lisa: cannot open a window; using the browser\n");
+                use_browser = 1;
+            }
+        }
+        if (use_browser) {
+            if (lisa_open_url(url) != LISA_PLAT_OK) fprintf(stderr, "lisa: open this address in a browser:\n");
+            printf("LISA is at %s\nKeep this running while you use it; Ctrl-C quits.\n", url);
+            fflush(stdout);
+            while (!lisa_stop_requested()) lisa_sleep_ms(200);
+        }
+        server_stop(srv);
+    }
+    lisa_model_free(chat);
+    lisa_model_free(embed);
+    return rc == LISA_OK ? EXIT_OK : fail(rc, "gui", err);
 }
 
 /* ---- model ----------------------------------------------------------------- */
@@ -524,10 +579,8 @@ int main(int argc, char** argv) {
     else if (strcmp(cmd, "serve") == 0) fn = cmd_serve;
     else if (strcmp(cmd, "model") == 0) fn = cmd_model;
     else if (strcmp(cmd, "migrate") == 0) fn = cmd_migrate;
-    else if (strcmp(cmd, "gui") == 0) {
-        fprintf(stderr, "lisa: the GUI arrives in the next release (W10); use `lisa serve` for now\n");
-        return EXIT_ERROR;
-    } else {
+    else if (strcmp(cmd, "gui") == 0) fn = cmd_gui;
+    else {
         fprintf(stderr, "lisa: unknown command '%s'\n%s", cmd, k_usage);
         return EXIT_USAGE;
     }

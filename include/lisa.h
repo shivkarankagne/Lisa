@@ -53,9 +53,9 @@ extern "C" {
 /* ==== Version ========================================================= */
 
 #define LISA_VERSION_MAJOR 0
-#define LISA_VERSION_MINOR 5
+#define LISA_VERSION_MINOR 6
 #define LISA_VERSION_PATCH 0
-#define LISA_VERSION_STRING "0.5.0"
+#define LISA_VERSION_STRING "0.6.0"
 
 /*
  * Version of the linked library (may differ from the header's macros if
@@ -731,7 +731,7 @@ typedef struct lisa_ask_options {
     size_t                  struct_size;
     int64_t                 top_k;           /* passages retrieved; default 8, 1..100 */
     int64_t                 prompt_budget;   /* max prompt tokens; default 1100 */
-    float                   min_similarity;  /* cosine floor for a passage; default 0.40 */
+    float                   min_similarity;  /* cosine floor for a passage; default 0.25 */
     int64_t                 max_tokens;      /* answer length limit; default 512 */
     float                   temperature;     /* default 0 (deterministic) */
     lisa_token_fn           on_token;        /* optional: answer text as it is generated */
@@ -741,7 +741,7 @@ typedef struct lisa_ask_options {
 } lisa_ask_options_t;
 
 #define LISA_ASK_OPTIONS_INIT \
-    { sizeof(lisa_ask_options_t), 8, 1100, 0.40f, 512, 0.0f, NULL, NULL, NULL, NULL }
+    { sizeof(lisa_ask_options_t), 8, 1100, 0.25f, 512, 0.0f, NULL, NULL, NULL, NULL }
 
 /* A passage the answer relies on. Strings are owned by the answer. */
 typedef struct lisa_citation {

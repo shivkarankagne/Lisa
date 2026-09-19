@@ -10,6 +10,8 @@
 
 #include <dirent.h>
 #include <signal.h>
+#include <spawn.h>
+#include <sys/wait.h>
 #include <errno.h>
 #include <limits.h>
 #include <pthread.h>
@@ -530,6 +532,48 @@ void lisa_sleep_ms(int64_t ms) {
     struct timespec ts = { (time_t)(ms / 1000), (long)(ms % 1000) * 1000000L };
     while (nanosleep(&ts, &ts) != 0 && errno == EINTR && !g_stop) {}
 }
+
+extern char** environ;
+
+int lisa_open_url(const char* url) {
+    if (url == NULL || strncmp(url, "http", 4) != 0) return LISA_PLAT_EINVAL;
+#ifdef __APPLE__
+    char* const argv[] = { (char*)"/usr/bin/open", (char*)url, NULL };
+#else
+    char* const argv[] = { (char*)"xdg-open", (char*)url, NULL };
+#endif
+    pid_t pid;
+    if (posix_spawnp(&pid, argv[0], NULL, NULL, argv, environ) != 0) return LISA_PLAT_EIO;
+    int status = 0;
+    if (waitpid(pid, &status, 0) < 0 || !WIFEXITED(status) || WEXITSTATUS(status) != 0) return LISA_PLAT_EIO;
+    return LISA_PLAT_OK;
+}
+
+#ifndef __APPLE__
+char* lisa_choose_folder(void) {
+    return NULL;
+}
+
+int lisa_file_drops_install(void* native_view, lisa_drop_fn fn, void* user) {
+    (void)native_view;
+    (void)fn;
+    (void)user;
+    return LISA_PLAT_EINVAL;
+}
+
+int lisa_ocr_available(void) {
+    return 0;
+}
+
+int lisa_ocr_image(const unsigned char* pixels, int width, int height, int stride, char** out) {
+    (void)pixels;
+    (void)width;
+    (void)height;
+    (void)stride;
+    if (out) *out = NULL;
+    return LISA_PLAT_EINVAL;
+}
+#endif
 
 /* ---- time ----------------------------------------------------------- */
 

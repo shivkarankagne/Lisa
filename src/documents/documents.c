@@ -20,6 +20,7 @@ static const char* const k_md_ext[]   = { "md", "markdown", "mdown", "mkd", NULL
 #ifdef LISA_HAVE_PDFIUM
 static const char* const k_pdf_ext[]  = { "pdf", NULL };
 #endif
+static const char* const k_docx_ext[] = { "docx", NULL };
 
 static const doc_extractor_t k_extractors[] = {
     { "text",     k_text_ext, doc_extract_text },
@@ -27,6 +28,7 @@ static const doc_extractor_t k_extractors[] = {
 #ifdef LISA_HAVE_PDFIUM
     { "pdf",      k_pdf_ext,  doc_extract_pdf },
 #endif
+    { "docx",     k_docx_ext, doc_extract_docx },
     { NULL, NULL, NULL },
 };
 

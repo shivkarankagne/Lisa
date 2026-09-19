@@ -91,6 +91,8 @@ static void test_registry(void) {
     TEST_ASSERT_EQUAL_STRING("text", doc_find_extractor("/a/b/notes.TXT")->name);
     TEST_ASSERT_EQUAL_STRING("markdown", doc_find_extractor("README.md")->name);
     TEST_ASSERT_NULL(doc_find_extractor("archive.zip"));
+    TEST_ASSERT_EQUAL_STRING("docx", doc_find_extractor("Rent Agreement.DOCX")->name);
+    TEST_ASSERT_NULL(doc_find_extractor("old.doc"));
     TEST_ASSERT_NULL(doc_find_extractor("noextension"));
     TEST_ASSERT_NULL(doc_find_extractor("dir.md/file"));
     TEST_ASSERT_NULL(doc_find_extractor("trailingdot."));
@@ -366,6 +368,94 @@ static void test_pdf(void) {
 #endif
 }
 
+/* ---- Word ------------------------------------------------------------- */
+
+static void test_docx(void) {
+    char path[1200];
+    snprintf(path, sizeof(path), "%s/sample.docx", g_fixtures);
+    doc_text_t t;
+    TEST_ASSERT_EQUAL_INT(DOC_OK, doc_extract(path, &t));
+    TEST_ASSERT_EQUAL_STRING("Sample Rent Agreement", t.title);
+    TEST_ASSERT_EQUAL_INT64(0, t.n_pages);
+    /* Runs split mid-number are joined; entities decoded; tabs and breaks kept. */
+    TEST_ASSERT_NOT_NULL(strstr(t.text, "monthly rent of Rs. 3,000 (Rupees Three Thousand only) per month."));
+    TEST_ASSERT_NOT_NULL(strstr(t.text, "Deposit\tRs. 6,000\nNotice period: one month"));
+    TEST_ASSERT_NOT_NULL(strstr(t.text, "Terms & conditions apply <see clause 4>."));
+    TEST_ASSERT_NOT_NULL(strstr(t.text, "Maintenance\tRs. 500"));
+    TEST_ASSERT_NOT_NULL(strstr(t.text, "\xe0\xa4\x95\xe0\xa4\xbf\xe0\xa4\xb0\xe0\xa4\xbe\xe0\xa4\xaf\xe0\xa4\xbe"));
+    TEST_ASSERT_NULL(strstr(t.text, "deleted sentence"));           /* tracked deletion */
+    /* Paragraphs are separated by blank lines, so the chunker sees them. */
+    TEST_ASSERT_NOT_NULL(strstr(t.text, "RENT AGREEMENT\n\nThe Tenant"));
+    doc_chunk_params_t p = DOC_CHUNK_PARAMS_DEFAULT;
+    check_chunks(&t, &p);
+    doc_text_free(&t);
+
+    /* Not a zip; a zip without word/document.xml; a password-protected file (OLE). */
+    const char* bad = write_file("docx", "PK but not really", 17);
+    TEST_ASSERT_EQUAL_INT(DOC_EFORMAT, doc_extract(bad, &t));
+    TEST_ASSERT_NULL(t.text);
+    static const unsigned char ole[16] = { 0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1 };
+    bad = write_file("docx", (const char*)ole, sizeof(ole));
+    TEST_ASSERT_EQUAL_INT(DOC_EENCRYPTED, doc_extract(bad, &t));
+    snprintf(path, sizeof(path), "%s/two_pages.pdf", g_fixtures);   /* any non-zip bytes */
+    FILE* f = fopen(path, "rb");
+    TEST_ASSERT_NOT_NULL(f);
+    char buf[64];
+    size_t n = fread(buf, 1, sizeof(buf), f);
+    fclose(f);
+    bad = write_file("docx", buf, n);
+    TEST_ASSERT_EQUAL_INT(DOC_EFORMAT, doc_extract(bad, &t));
+    snprintf(path, sizeof(path), "%s/missing.docx", g_scratch);
+    TEST_ASSERT_EQUAL_INT(DOC_ENOTFOUND, doc_extract(path, &t));
+}
+
+/* ---- scanned PDF (OCR) ---------------------------------------------------- */
+
+static void test_scanned_pdf_ocr(void) {
+#ifndef LISA_HAVE_PDFIUM
+    TEST_IGNORE_MESSAGE("built without PDFium");
+#else
+    char path[1200];
+    snprintf(path, sizeof(path), "%s/scanned.pdf", g_fixtures);
+    doc_text_t t;
+    TEST_ASSERT_EQUAL_INT(DOC_OK, doc_extract(path, &t));
+    TEST_ASSERT_EQUAL_INT64(2, t.n_pages);
+    if (!lisa_ocr_available()) {
+        /* No recogniser on this platform: the scanned pages have no text. */
+        TEST_ASSERT_EQUAL_INT64(0, (int64_t)strspn(t.text, "\n"));
+        doc_text_free(&t);
+        TEST_IGNORE_MESSAGE("no OCR on this platform");
+    }
+    const char* rent = strstr(t.text, "monthly rent of");
+    TEST_ASSERT_NOT_NULL_MESSAGE(rent, t.text);
+    TEST_ASSERT_NOT_NULL(strstr(t.text, "Rs. 2,000"));
+    TEST_ASSERT_NOT_NULL(strstr(t.text, "RENT AGREEMENT"));
+    /* Recognised text keeps its page. */
+    TEST_ASSERT_EQUAL_INT64(2, doc_page_at(&t, rent - t.text));
+    TEST_ASSERT_EQUAL_INT64(1, doc_page_at(&t, strstr(t.text, "RENT AGREEMENT") - t.text));
+    doc_text_free(&t);
+
+    /* A page with a real text layer is not sent to OCR (its text is exact). */
+    snprintf(path, sizeof(path), "%s/two_pages.pdf", g_fixtures);
+    TEST_ASSERT_EQUAL_INT(DOC_OK, doc_extract(path, &t));
+    TEST_ASSERT_NOT_NULL(strstr(t.text, "Pump bearings must be inspected every 500 hours."));
+    doc_text_free(&t);
+#endif
+}
+
+static void test_ocr_platform(void) {
+    if (!lisa_ocr_available()) TEST_IGNORE_MESSAGE("no OCR on this platform");
+    char* out = (char*)1;
+    TEST_ASSERT_EQUAL_INT(LISA_PLAT_EINVAL, lisa_ocr_image(NULL, 10, 10, 40, &out));
+    TEST_ASSERT_NULL(out);
+    unsigned char px[4 * 8 * 8];
+    TEST_ASSERT_EQUAL_INT(LISA_PLAT_EINVAL, lisa_ocr_image(px, 8, 8, 16, &out));   /* stride too small */
+    memset(px, 0xFF, sizeof(px));
+    TEST_ASSERT_EQUAL_INT(LISA_PLAT_OK, lisa_ocr_image(px, 8, 8, 32, &out));      /* blank: no text */
+    TEST_ASSERT_EQUAL_STRING("", out);
+    free(out);
+}
+
 int main(int argc, char** argv) {
     if (argc != 3) {
         fprintf(stderr, "usage: %s <scratch_dir> <fixtures_dir>\n", argv[0]);
@@ -388,5 +478,8 @@ int main(int argc, char** argv) {
     RUN_TEST(test_chunk_pages);
     RUN_TEST(test_chunk_randomised);
     RUN_TEST(test_pdf);
+    RUN_TEST(test_docx);
+    RUN_TEST(test_scanned_pdf_ocr);
+    RUN_TEST(test_ocr_platform);
     return UNITY_END() == 0 ? 0 : 1;
 }

@@ -205,6 +205,34 @@ int lisa_stop_requested(void);
 /* Sleep for ms milliseconds. */
 void lisa_sleep_ms(int64_t ms);
 
+/* Open a URL in the user's default browser. */
+int lisa_open_url(const char* url);
+
+/* ---- desktop (implemented on macOS; elsewhere they report EINVAL/NULL) ---- */
+
+/*
+ * Show the system "choose a folder" dialog. Returns the chosen path,
+ * malloc'd, or NULL if cancelled or unsupported. Call on the UI thread.
+ */
+char* lisa_choose_folder(void);
+
+/*
+ * Make a native web view (WKWebView* on macOS) report files and folders
+ * dropped on it: fn receives their absolute paths on the UI thread
+ * instead of the page receiving the drop. Other drags behave as before.
+ */
+typedef void (*lisa_drop_fn)(void* user, const char* const* paths, int count);
+int lisa_file_drops_install(void* native_view, lisa_drop_fn fn, void* user);
+
+/*
+ * Recognise printed text in an image (OCR) with the operating system's
+ * recogniser (Apple Vision on macOS). pixels: 32-bit BGRx rows of
+ * `stride` bytes (e.g. a PDFium bitmap). *out receives the text, malloc'd,
+ * one recognised line per text line. EINVAL where no recogniser exists.
+ */
+int lisa_ocr_available(void);
+int lisa_ocr_image(const unsigned char* pixels, int width, int height, int stride, char** out);
+
 /* ---- time ----------------------------------------------------------- */
 
 /* Monotonic clock in nanoseconds. Only differences are meaningful. */

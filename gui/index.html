@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>LISA</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="/app.css">
+<script src="/app.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#question">Skip to the question box</a>
+<header class="top">
+  <h1 class="brand">LISA</h1>
+  <p class="tagline">Answers from your documents. Nothing leaves this computer.</p>
+  <nav class="top-actions" aria-label="Views">
+    <button type="button" id="nav-ask" class="tab" aria-pressed="true">Ask</button>
+    <button type="button" id="nav-settings" class="tab" aria-pressed="false">Settings</button>
+    <button type="button" id="theme" class="ghost" aria-label="Theme: automatic">Theme: auto</button>
+  </nav>
+</header>
+
+<div id="banner" class="banner" role="alert" hidden></div>
+
+<div class="layout" id="view-ask">
+  <aside class="side" aria-labelledby="coll-heading">
+    <h2 id="coll-heading">Collections</h2>
+    <ul id="collections" class="collections" aria-describedby="coll-empty"></ul>
+    <p id="coll-empty" class="muted" hidden>No collections yet. Add a folder below to create one.</p>
+
+    <form id="add-form" class="card" aria-labelledby="add-heading">
+      <h2 id="add-heading">Add documents</h2>
+      <label for="add-coll">Collection</label>
+      <input id="add-coll" name="collection" required pattern="[A-Za-z0-9_\-]{1,64}"
+             autocomplete="off" spellcheck="false" placeholder="e.g. manuals"
+             aria-describedby="add-coll-help">
+      <p id="add-coll-help" class="help">Letters, digits, - and _. A new name creates a collection.</p>
+      <label for="add-path">Folder or file</label>
+      <div class="row">
+        <input id="add-path" name="path" required autocomplete="off" spellcheck="false"
+               placeholder="/Users/you/Documents/manuals" aria-describedby="add-path-help">
+        <button type="button" id="choose" class="secondary" hidden>Choose…</button>
+      </div>
+      <p id="add-path-help" class="help">Text, Markdown and PDF files. You can also drop a folder on this window.</p>
+      <button type="submit" id="add-go">Add</button>
+      <div id="job" class="job" hidden>
+        <progress id="job-bar" aria-label="Indexing progress"></progress>
+        <p id="job-text" role="status" aria-live="polite"></p>
+      </div>
+    </form>
+  </aside>
+
+  <main class="main" id="main">
+    <form id="ask-form" class="ask" aria-labelledby="ask-heading">
+      <h2 id="ask-heading" class="visually-hidden">Ask a question</h2>
+      <label for="question">Ask <span id="ask-in"></span></label>
+      <div class="row">
+        <textarea id="question" rows="2" required
+                  placeholder="e.g. How often must the pump bearings be inspected?"
+                  aria-describedby="ask-help"></textarea>
+        <button type="submit" id="ask-go">Ask</button>
+      </div>
+      <p id="ask-help" class="help">Enter to ask, Shift+Enter for a new line.</p>
+    </form>
+
+    <section id="answer" class="answer" aria-labelledby="answer-heading" hidden>
+      <h2 id="answer-heading" class="visually-hidden">Answer</h2>
+      <div id="answer-text" class="answer-text" aria-live="polite" aria-busy="false"></div>
+      <p id="answer-meta" class="muted"></p>
+      <h3 id="sources-heading" hidden>Sources</h3>
+      <ol id="sources" class="sources" aria-labelledby="sources-heading"></ol>
+    </section>
+
+    <section id="passage" class="passage card" aria-labelledby="passage-heading" hidden tabindex="-1">
+      <div class="passage-head">
+        <h2 id="passage-heading">Source</h2>
+        <button type="button" id="passage-close" class="ghost" aria-label="Close source">Close</button>
+      </div>
+      <p id="passage-where" class="where"></p>
+      <blockquote id="passage-quote"></blockquote>
+    </section>
+  </main>
+</div>
+
+<main class="settings" id="view-settings" hidden aria-labelledby="settings-heading">
+  <h2 id="settings-heading">Settings</h2>
+  <section class="card" aria-labelledby="data-heading">
+    <h3 id="data-heading">Data directory</h3>
+    <p id="data-dir" class="mono"></p>
+    <p class="help">Collections and settings live here. To use another directory, start LISA with
+      <code>lisa gui --data &lt;dir&gt;</code>.</p>
+  </section>
+  <section class="card" aria-labelledby="models-heading">
+    <h3 id="models-heading">Models</h3>
+    <form id="models-form">
+      <label for="chat-model">Chat model file</label>
+      <input id="chat-model" autocomplete="off" spellcheck="false" aria-describedby="chat-status">
+      <p id="chat-status" class="help"></p>
+      <label for="embed-model">Embedding model file</label>
+      <input id="embed-model" autocomplete="off" spellcheck="false" aria-describedby="embed-status">
+      <p id="embed-status" class="help"></p>
+      <button type="submit">Save</button>
+      <p id="models-msg" role="status" aria-live="polite"></p>
+    </form>
+    <p class="help">Changing a model applies the next time LISA starts. A collection keeps the
+      embedding model it was built with.</p>
+  </section>
+  <p id="version" class="muted"></p>
+</main>
+</body>
+</html>

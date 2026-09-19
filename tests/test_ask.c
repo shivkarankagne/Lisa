@@ -143,7 +143,16 @@ static void test_not_found(void) {
     o.max_tokens = 64;
     lisa_answer_t* a = NULL;
 
-    /* Off-topic: nothing passes the similarity floor; the model is not run. */
+    /* Off-topic with the default floor: whether or not a passage reaches the
+     * model, the answer is "not found" with no citations. */
+    TEST_ASSERT_EQUAL_INT(LISA_OK, ask("Who won the cricket world cup in 2011?", &o, &a));
+    TEST_ASSERT_FALSE(a->found);
+    TEST_ASSERT_EQUAL_INT64(0, a->citation_count);
+    lisa_answer_free(a);
+
+    /* Off-topic under a strict floor: nothing passes; the model is not run. */
+    memset(&s, 0, sizeof(s));
+    o.min_similarity = 0.40f;
     TEST_ASSERT_EQUAL_INT(LISA_OK, ask("Who won the cricket world cup in 2011?", &o, &a));
     TEST_ASSERT_FALSE(a->found);
     TEST_ASSERT_EQUAL_STRING(LISA_NOT_FOUND_TEXT, a->text);
@@ -155,6 +164,8 @@ static void test_not_found(void) {
     TEST_ASSERT_TRUE(a->passages_retrieved > 0);
     lisa_answer_free(a);
 
+    o = (lisa_ask_options_t)LISA_ASK_OPTIONS_INIT;
+    o.max_tokens = 64;
     /* On topic, but the fact is missing: the model declines. */
     TEST_ASSERT_EQUAL_INT(LISA_OK, ask("What is our parental leave policy?", &o, &a));
     TEST_ASSERT_TRUE(a->passages_used > 0);
