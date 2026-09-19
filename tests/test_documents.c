@@ -14,6 +14,7 @@
 
 #include "unity.h"
 #include "../src/documents/documents.h"
+#include "../src/platform/platform.h"
 
 static const char* g_scratch;
 static const char* g_fixtures;
@@ -372,6 +373,7 @@ int main(int argc, char** argv) {
     }
     g_scratch = argv[1];
     g_fixtures = argv[2];
+    lisa_mkdir(g_scratch);  /* may already exist */
     UNITY_BEGIN();
     RUN_TEST(test_normalize_line_endings_and_controls);
     RUN_TEST(test_normalize_encodings);

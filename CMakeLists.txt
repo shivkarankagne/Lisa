@@ -105,7 +105,7 @@ target_compile_options(lisa_utf8proc PRIVATE -w)
 # PDFium: built from source by scripts/build_pdfium.sh (no static library
 # is published for macOS). Required for PDF support.
 set(LISA_PDFIUM_DIR "${CMAKE_SOURCE_DIR}/.deps/pdfium" CACHE PATH "Static PDFium build")
-option(LISA_REQUIRE_PDF "Fail if PDFium is not available" OFF)  # ON once CI builds PDFium (W5)
+option(LISA_REQUIRE_PDF "Fail if PDFium is not available" ON)
 if(EXISTS "${LISA_PDFIUM_DIR}/lib/libpdfium.a")
     set(LISA_HAVE_PDFIUM ON)
     add_library(lisa_pdfium STATIC IMPORTED)
@@ -115,7 +115,7 @@ if(EXISTS "${LISA_PDFIUM_DIR}/lib/libpdfium.a")
     if(APPLE)
         target_link_libraries(lisa_pdfium INTERFACE
             "-framework AppKit" "-framework CoreFoundation" "-framework CoreGraphics"
-            "-framework Foundation" c++)
+            "-framework Foundation" "-framework Security" c++)
     endif()
 elseif(LISA_REQUIRE_PDF)
     message(FATAL_ERROR
