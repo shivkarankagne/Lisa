@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "../src/platform/platform.h"
 
@@ -36,6 +37,47 @@ static int read_equals(const char* path, const char* text) {
     size_t n = fread(buf, 1, sizeof(buf) - 1, f);
     fclose(f);
     return n == strlen(text) && memcmp(buf, text, n) == 0;
+}
+
+
+typedef struct {
+    char   seen[16][256];
+    int    n;
+    int    stop_after;
+} walk_log_t;
+
+static int on_file(void* user, const char* path, const lisa_file_info_t* info) {
+    walk_log_t* w = (walk_log_t*)user;
+    const char* base = strrchr(path, '/');
+    const char* rel = strstr(path, "/walk/");
+    snprintf(w->seen[w->n], sizeof(w->seen[w->n]), "%s", rel ? rel + 6 : (base ? base + 1 : path));
+    w->n++;
+    (void)info;
+    return (w->stop_after > 0 && w->n >= w->stop_after) ? 7 : 0;
+}
+
+typedef struct {
+    lisa_mutex_t* m;
+    long          counter;
+} shared_t;
+
+static void add_many(void* arg) {
+    shared_t* sh = (shared_t*)arg;
+    for (int i = 0; i < 10000; i++) {
+        lisa_mutex_lock(sh->m);
+        sh->counter++;
+        lisa_mutex_unlock(sh->m);
+    }
+}
+
+static void touch(const char* dir, const char* name) {
+    char* p = lisa_path_join(dir, name);
+    FILE* f = fopen(p, "wb");
+    if (f) {
+        fputs("x", f);
+        fclose(f);
+    }
+    free(p);
 }
 
 int main(int argc, char** argv) {
@@ -145,6 +187,54 @@ int main(int argc, char** argv) {
     for (int i = 0; i < 100000; i++) x += i;
     int64_t t1 = lisa_time_monotonic_ns();
     check(t0 > 0 && t1 > t0, "monotonic clock advances");
+
+    /* file info + absolute path */
+    lisa_file_info_t fi;
+    check(write_file(a, "12345678") == 0 && lisa_file_info(a, &fi) == LISA_PLAT_OK &&
+          fi.is_file && !fi.is_dir && fi.size == 8 && fi.mtime_ns > 0, "file_info on file");
+    check(lisa_file_info(dir, &fi) == LISA_PLAT_OK && fi.is_dir && !fi.is_file, "file_info on dir");
+    check(lisa_file_info(missing, &fi) == LISA_PLAT_ENOENT, "file_info missing -> ENOENT");
+    char* dotted = lisa_path_join(dir, "./a.txt");
+    char* abs1 = lisa_path_absolute(dotted);
+    char* abs2 = lisa_path_absolute(a);
+    check(abs1 && abs2 && strcmp(abs1, abs2) == 0 && abs1[0] == '/' && strstr(abs1, "/./") == NULL,
+          "path_absolute canonicalises");
+    check(lisa_path_absolute(missing) == NULL, "path_absolute missing -> NULL");
+    free(dotted); free(abs1); free(abs2);
+
+    /* directory walk */
+    char* wroot = lisa_path_join(dir, "walk");
+    char* sub = lisa_path_join(wroot, "sub");
+    char* hid = lisa_path_join(wroot, ".hidden");
+    lisa_mkdir(wroot); lisa_mkdir(sub); lisa_mkdir(hid);
+    touch(wroot, "b.txt"); touch(wroot, "a.txt"); touch(sub, "c.md");
+    touch(hid, "x.txt"); touch(wroot, ".h.txt");
+    char* loop = lisa_path_join(sub, "loop");
+    check(symlink(wroot, loop) == 0, "create symlink loop");
+    walk_log_t w;
+    memset(&w, 0, sizeof(w));
+    check(lisa_dir_walk(wroot, 0, on_file, &w) == LISA_PLAT_OK && w.n == 3 &&
+          strcmp(w.seen[0], "a.txt") == 0 && strcmp(w.seen[1], "b.txt") == 0 &&
+          strcmp(w.seen[2], "sub/c.md") == 0, "walk: sorted, hidden skipped, symlink dir not followed");
+    memset(&w, 0, sizeof(w));
+    check(lisa_dir_walk(wroot, 1, on_file, &w) == LISA_PLAT_OK && w.n == 5, "walk: include_hidden");
+    memset(&w, 0, sizeof(w));
+    w.stop_after = 2;
+    check(lisa_dir_walk(wroot, 0, on_file, &w) == 7 && w.n == 2, "walk: callback stops the walk");
+    check(lisa_dir_walk(a, 0, on_file, &w) == LISA_PLAT_EINVAL, "walk on a file -> EINVAL");
+    free(loop); free(hid); free(sub); free(wroot);
+
+    /* threads + mutex */
+    shared_t sh = { NULL, 0 };
+    lisa_thread_t* th[4];
+    check(lisa_mutex_create(&sh.m) == LISA_PLAT_OK, "mutex create");
+    int started = 1;
+    for (int i = 0; i < 4; i++) started &= lisa_thread_start(add_many, &sh, &th[i]) == LISA_PLAT_OK;
+    for (int i = 0; i < 4; i++) lisa_thread_join(th[i]);
+    check(started && sh.counter == 40000, "4 threads x 10000 increments under mutex");
+    lisa_mutex_destroy(sh.m);
+    lisa_thread_join(NULL);
+    lisa_mutex_destroy(NULL);
 
     free(dir); free(a); free(b); free(e); free(lk); free(missing); free(nested);
 

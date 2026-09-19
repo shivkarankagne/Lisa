@@ -115,7 +115,7 @@ if(EXISTS "${LISA_PDFIUM_DIR}/lib/libpdfium.a")
     if(APPLE)
         target_link_libraries(lisa_pdfium INTERFACE
             "-framework AppKit" "-framework CoreFoundation" "-framework CoreGraphics"
-            "-framework Foundation" "-framework Security" c++)
+            "-framework Foundation" "-framework Security")
     endif()
 elseif(LISA_REQUIRE_PDF)
     message(FATAL_ERROR

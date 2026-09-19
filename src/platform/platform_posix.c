@@ -8,7 +8,10 @@
 
 #include "platform.h"
 
+#include <dirent.h>
 #include <errno.h>
+#include <limits.h>
+#include <pthread.h>
 #include <fcntl.h>
 #include <stdlib.h>
 #include <string.h>
@@ -60,7 +63,106 @@ int lisa_path_exists(const char* path) {
     return stat(path, &st) == 0 ? 1 : 0;
 }
 
+char* lisa_path_absolute(const char* path) {
+    if (path == NULL) return NULL;
+    char buf[PATH_MAX];
+    if (realpath(path, buf) == NULL) return NULL;
+    size_t n = strlen(buf) + 1;
+    char* out = (char*)malloc(n);
+    if (out) memcpy(out, buf, n);
+    return out;
+}
+
 /* ---- directories and files ------------------------------------------ */
+
+static int64_t mtime_ns_of(const struct stat* st) {
+#ifdef __APPLE__
+    return (int64_t)st->st_mtimespec.tv_sec * 1000000000LL + st->st_mtimespec.tv_nsec;
+#else
+    return (int64_t)st->st_mtim.tv_sec * 1000000000LL + st->st_mtim.tv_nsec;
+#endif
+}
+
+int lisa_file_info(const char* path, lisa_file_info_t* out) {
+    if (path == NULL || out == NULL) return LISA_PLAT_EINVAL;
+    memset(out, 0, sizeof(*out));
+    struct stat ls, st;
+    if (lstat(path, &ls) != 0) return from_errno(errno);
+    out->is_symlink = S_ISLNK(ls.st_mode) ? 1 : 0;
+    if (stat(path, &st) != 0) return from_errno(errno);  /* dangling symlink */
+    out->is_file = S_ISREG(st.st_mode) ? 1 : 0;
+    out->is_dir = S_ISDIR(st.st_mode) ? 1 : 0;
+    out->size = (int64_t)st.st_size;
+    out->mtime_ns = mtime_ns_of(&st);
+    return LISA_PLAT_OK;
+}
+
+static int cmp_names(const void* a, const void* b) {
+    return strcmp(*(const char* const*)a, *(const char* const*)b);
+}
+
+static int walk(const char* dir, int include_hidden, lisa_walk_fn fn, void* user, int depth) {
+    if (depth > 256) return LISA_PLAT_OK;  /* pathological nesting */
+    DIR* d = opendir(dir);
+    if (d == NULL) return from_errno(errno);
+
+    char** names = NULL;
+    size_t n = 0, cap = 0;
+    int rc = LISA_PLAT_OK;
+    struct dirent* e;
+    while ((e = readdir(d)) != NULL) {
+        if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) continue;
+        if (!include_hidden && e->d_name[0] == '.') continue;
+        if (n == cap) {
+            cap = cap ? cap * 2 : 64;
+            char** g = (char**)realloc(names, cap * sizeof(char*));
+            if (g == NULL) {
+                rc = LISA_PLAT_ENOMEM;
+                break;
+            }
+            names = g;
+        }
+        names[n] = strdup(e->d_name);
+        if (names[n] == NULL) {
+            rc = LISA_PLAT_ENOMEM;
+            break;
+        }
+        n++;
+    }
+    closedir(d);
+    if (rc == LISA_PLAT_OK) qsort(names, n, sizeof(char*), cmp_names);
+
+    for (size_t i = 0; rc == LISA_PLAT_OK && i < n; i++) {
+        char* path = lisa_path_join(dir, names[i]);
+        if (path == NULL) {
+            rc = LISA_PLAT_ENOMEM;
+            break;
+        }
+        lisa_file_info_t info;
+        if (lisa_file_info(path, &info) == LISA_PLAT_OK) {
+            if (info.is_dir && !info.is_symlink) {
+                rc = walk(path, include_hidden, fn, user, depth + 1);
+                if (rc < 0 && rc != LISA_PLAT_ENOMEM) rc = LISA_PLAT_OK;  /* unreadable subdir: skip */
+            } else if (info.is_file) {
+                int stop = fn(user, path, &info);
+                if (stop != 0) rc = stop;
+            }
+        }
+        free(path);
+    }
+    for (size_t i = 0; i < n; i++) free(names[i]);
+    free(names);
+    return rc;
+}
+
+int lisa_dir_walk(const char* root, int include_hidden, lisa_walk_fn fn, void* user) {
+    if (root == NULL || fn == NULL) return LISA_PLAT_EINVAL;
+    lisa_file_info_t info;
+    int rc = lisa_file_info(root, &info);
+    if (rc != LISA_PLAT_OK) return rc;
+    if (!info.is_dir) return LISA_PLAT_EINVAL;
+    return walk(root, include_hidden, fn, user, 0);
+}
 
 int lisa_mkdir(const char* path) {
     if (path == NULL || path[0] == '\0') return LISA_PLAT_EINVAL;
@@ -219,6 +321,72 @@ void lisa_lock_release(lisa_lock_t* lock) {
     flock(lock->fd, LOCK_UN);
     close(lock->fd);
     free(lock);
+}
+
+/* ---- threads -------------------------------------------------------- */
+
+struct lisa_thread {
+    pthread_t id;
+    void    (*fn)(void*);
+    void*    arg;
+};
+
+static void* thread_main(void* p) {
+    lisa_thread_t* t = (lisa_thread_t*)p;
+    t->fn(t->arg);
+    return NULL;
+}
+
+int lisa_thread_start(void (*fn)(void* arg), void* arg, lisa_thread_t** out) {
+    if (fn == NULL || out == NULL) return LISA_PLAT_EINVAL;
+    *out = NULL;
+    lisa_thread_t* t = (lisa_thread_t*)calloc(1, sizeof(*t));
+    if (t == NULL) return LISA_PLAT_ENOMEM;
+    t->fn = fn;
+    t->arg = arg;
+    if (pthread_create(&t->id, NULL, thread_main, t) != 0) {
+        free(t);
+        return LISA_PLAT_EIO;
+    }
+    *out = t;
+    return LISA_PLAT_OK;
+}
+
+void lisa_thread_join(lisa_thread_t* t) {
+    if (t == NULL) return;
+    pthread_join(t->id, NULL);
+    free(t);
+}
+
+struct lisa_mutex {
+    pthread_mutex_t m;
+};
+
+int lisa_mutex_create(lisa_mutex_t** out) {
+    if (out == NULL) return LISA_PLAT_EINVAL;
+    *out = NULL;
+    lisa_mutex_t* m = (lisa_mutex_t*)calloc(1, sizeof(*m));
+    if (m == NULL) return LISA_PLAT_ENOMEM;
+    if (pthread_mutex_init(&m->m, NULL) != 0) {
+        free(m);
+        return LISA_PLAT_EIO;
+    }
+    *out = m;
+    return LISA_PLAT_OK;
+}
+
+void lisa_mutex_lock(lisa_mutex_t* m) {
+    pthread_mutex_lock(&m->m);
+}
+
+void lisa_mutex_unlock(lisa_mutex_t* m) {
+    pthread_mutex_unlock(&m->m);
+}
+
+void lisa_mutex_destroy(lisa_mutex_t* m) {
+    if (m == NULL) return;
+    pthread_mutex_destroy(&m->m);
+    free(m);
 }
 
 /* ---- time ----------------------------------------------------------- */

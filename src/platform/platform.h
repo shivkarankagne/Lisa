@@ -48,7 +48,37 @@ int lisa_path_is_dir(const char* path);
 /* 1 if path exists (file, directory, or other), else 0. */
 int lisa_path_exists(const char* path);
 
+/* Absolute, canonical form of an existing path (symlinks resolved).
+ * Returns a malloc'd string, or NULL if the path does not exist. */
+char* lisa_path_absolute(const char* path);
+
 /* ---- directories and files ------------------------------------------ */
+
+typedef struct {
+    int64_t size;       /* bytes (regular files) */
+    int64_t mtime_ns;   /* last modification, nanoseconds since the epoch */
+    int     is_file;    /* regular file */
+    int     is_dir;
+    int     is_symlink; /* the path itself is a symbolic link */
+} lisa_file_info_t;
+
+/* Information about path (following symlinks for size/type). */
+int lisa_file_info(const char* path, lisa_file_info_t* out);
+
+/*
+ * Called for each regular file found by lisa_dir_walk. path is valid only
+ * during the call. Return 0 to continue, non-zero to stop the walk (the
+ * walk then returns that value).
+ */
+typedef int (*lisa_walk_fn)(void* user, const char* path, const lisa_file_info_t* info);
+
+/*
+ * Visit every regular file under root, recursively, in a deterministic
+ * order (entries sorted by name). Names starting with "." are skipped
+ * unless include_hidden is set. Symbolic links to directories are not
+ * followed (no cycles); symbolic links to files are visited.
+ */
+int lisa_dir_walk(const char* root, int include_hidden, lisa_walk_fn fn, void* user);
 
 /* Create one directory (parent must exist). EEXIST if it already exists. */
 int lisa_mkdir(const char* path);
@@ -119,6 +149,23 @@ int lisa_lock_acquire(const char* path, int wait, lisa_lock_t** out);
 
 /* Release a lock. NULL is ignored. */
 void lisa_lock_release(lisa_lock_t* lock);
+
+/* ---- threads -------------------------------------------------------- */
+
+typedef struct lisa_thread lisa_thread_t;
+
+/* Start fn(arg) on a new thread. Join it with lisa_thread_join. */
+int lisa_thread_start(void (*fn)(void* arg), void* arg, lisa_thread_t** out);
+
+/* Wait for the thread to finish and release it. NULL is ignored. */
+void lisa_thread_join(lisa_thread_t* t);
+
+typedef struct lisa_mutex lisa_mutex_t;
+
+int  lisa_mutex_create(lisa_mutex_t** out);
+void lisa_mutex_lock(lisa_mutex_t* m);
+void lisa_mutex_unlock(lisa_mutex_t* m);
+void lisa_mutex_destroy(lisa_mutex_t* m);   /* NULL is ignored */
 
 /* ---- time ----------------------------------------------------------- */
 
