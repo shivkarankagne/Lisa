@@ -110,6 +110,16 @@ target_compile_options(lisa_civetweb PRIVATE -w)
 find_package(Threads REQUIRED)
 target_link_libraries(lisa_civetweb PUBLIC Threads::Threads)
 
+# webview (third_party/webview/INTAKE.md): native window for `lisa gui`.
+if(APPLE)
+    add_library(lisa_webview STATIC third_party/webview/src/webview.cc)
+    target_include_directories(lisa_webview PUBLIC third_party/webview/include)
+    target_compile_definitions(lisa_webview PUBLIC WEBVIEW_STATIC)
+    target_compile_features(lisa_webview PRIVATE cxx_std_11)
+    target_compile_options(lisa_webview PRIVATE -w)
+    target_link_libraries(lisa_webview PUBLIC "-framework WebKit" "-framework Cocoa")
+endif()
+
 add_library(lisa_utf8proc STATIC third_party/utf8proc/utf8proc.c)
 target_include_directories(lisa_utf8proc PUBLIC third_party/utf8proc)
 target_compile_definitions(lisa_utf8proc PUBLIC UTF8PROC_STATIC)

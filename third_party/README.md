@@ -22,4 +22,5 @@ binary. Rules (see `CLAUDE.md` and `LISA_COMPLETION_PLAN.md` §5):
 | [llama.cpp](llama.cpp/INTAKE.md) | v0.4.1 | MIT (+ bundled permissive vendor code) | Model runtime, embeddings (W4) |
 | [yyjson](yyjson/INTAKE.md) | 0.12.0 | MIT | JSON for HTTP, CLI `--json`, config (W9) |
 | [civetweb](civetweb/INTAKE.md) | v1.16 | MIT (+ zlib-style md5, public-domain sha1) | Local HTTP server (W9) |
+| [webview](webview/INTAKE.md) | 0.12.0 | MIT | Native GUI window (W10) |
 | [unity](unity/INTAKE.md) | 2.7.0 | MIT | C unit tests (test-only, not shipped) |
