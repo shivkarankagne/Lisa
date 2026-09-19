@@ -38,8 +38,8 @@ W0 (parallel, anytime)
 W1 → W2 → W3 → W4, W5 (parallel) → W6, W7 → W8 → W9 → W10, W11 → W12
 ```
 
-W1–W6 are done (reports `LISA_REPORT_AND_UPDATE_002.md`–`_007.md`);
-next is **W7**. Check the plan's acceptance criteria for the package you
+W1–W7 are done (reports `LISA_REPORT_AND_UPDATE_002.md`–`_008.md`);
+next is **W8**. Check the plan's acceptance criteria for the package you
 are on; a package is not done until every criterion is met.
 
 ## Non-negotiable rules
@@ -239,7 +239,7 @@ Current:
     src/platform/       OS abstraction (POSIX)
     src/kernels/        kernel registry, scalar + NEON intrinsics kernels
     src/kernels/arm64/  legacy assembly kernel + wrapper (test-only path)
-    src/retrieval/      scalar reference + lisa_search
+    src/retrieval/      scalar reference + lisa_search; RRF fusion; lisa_index seam (exact)
     src/storage/        storage v2 (store.h); v1.1 (storage.h) until W9
     src/cli/            CLI entry point
     include/lisa.h      public API (W3)
