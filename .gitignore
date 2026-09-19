@@ -53,3 +53,6 @@ build/lisa_asan
 # Model files (downloaded locally, never committed)
 /models/
 *.gguf
+
+# Locally built dependencies (scripts/build_pdfium.sh)
+/.deps/

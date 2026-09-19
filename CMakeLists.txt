@@ -93,12 +93,47 @@ if(NOT LISA_HEADER_VERSION STREQUAL PROJECT_VERSION)
     message(FATAL_ERROR "include/lisa.h version ${LISA_HEADER_VERSION} != project version ${PROJECT_VERSION}")
 endif()
 
+add_library(lisa_md4c STATIC third_party/md4c/md4c.c)
+target_include_directories(lisa_md4c PUBLIC third_party/md4c)
+target_compile_options(lisa_md4c PRIVATE -w)
+
+add_library(lisa_utf8proc STATIC third_party/utf8proc/utf8proc.c)
+target_include_directories(lisa_utf8proc PUBLIC third_party/utf8proc)
+target_compile_definitions(lisa_utf8proc PUBLIC UTF8PROC_STATIC)
+target_compile_options(lisa_utf8proc PRIVATE -w)
+
+# PDFium: built from source by scripts/build_pdfium.sh (no static library
+# is published for macOS). Required for PDF support.
+set(LISA_PDFIUM_DIR "${CMAKE_SOURCE_DIR}/.deps/pdfium" CACHE PATH "Static PDFium build")
+option(LISA_REQUIRE_PDF "Fail if PDFium is not available" OFF)  # ON once CI builds PDFium (W5)
+if(EXISTS "${LISA_PDFIUM_DIR}/lib/libpdfium.a")
+    set(LISA_HAVE_PDFIUM ON)
+    add_library(lisa_pdfium STATIC IMPORTED)
+    set_target_properties(lisa_pdfium PROPERTIES
+        IMPORTED_LOCATION "${LISA_PDFIUM_DIR}/lib/libpdfium.a"
+        INTERFACE_INCLUDE_DIRECTORIES "${LISA_PDFIUM_DIR}/include")
+    if(APPLE)
+        target_link_libraries(lisa_pdfium INTERFACE
+            "-framework AppKit" "-framework CoreFoundation" "-framework CoreGraphics"
+            "-framework Foundation" c++)
+    endif()
+elseif(LISA_REQUIRE_PDF)
+    message(FATAL_ERROR
+        "PDFium not found in ${LISA_PDFIUM_DIR}. Build it with scripts/build_pdfium.sh "
+        "(or configure with -DLISA_REQUIRE_PDF=OFF to build without PDF support).")
+else()
+    message(WARNING "Building WITHOUT PDF support (LISA_REQUIRE_PDF=OFF).")
+endif()
+
 # ---- core library ------------------------------------------------------
 
 add_library(lisa_core STATIC
     src/api/lisa_api.c
     src/api/lisa_models.c
     src/models/models.c
+    src/documents/documents.c
+    src/documents/markdown.c
+    src/documents/chunk.c
     src/platform/platform_posix.c
     src/kernels/registry.c
     src/kernels/kernels_scalar.c
@@ -111,7 +146,12 @@ add_library(lisa_core STATIC
     src/kernels/arm64/lisa_ultra_mac.s
 )
 target_include_directories(lisa_core PUBLIC include src)
-target_link_libraries(lisa_core PUBLIC lisa_sqlite m PRIVATE llama vendor::hash)
+target_link_libraries(lisa_core PUBLIC lisa_sqlite m PRIVATE llama vendor::hash lisa_md4c lisa_utf8proc)
+if(LISA_HAVE_PDFIUM)
+    target_sources(lisa_core PRIVATE src/documents/pdf.c)
+    target_compile_definitions(lisa_core PRIVATE LISA_HAVE_PDFIUM)
+    target_link_libraries(lisa_core PRIVATE lisa_pdfium)
+endif()
 
 # ---- executable --------------------------------------------------------
 
@@ -162,6 +202,14 @@ if(LISA_BUILD_TESTS)
     target_link_libraries(test_header_cxx PRIVATE lisa_core)
     target_compile_options(test_header_cxx PRIVATE -Wall -Wextra -pedantic)
     add_test(NAME test_header_cxx COMMAND test_header_cxx)
+
+    add_executable(test_documents tests/test_documents.c)
+    target_link_libraries(test_documents PRIVATE lisa_core lisa_unity)
+    if(LISA_HAVE_PDFIUM)
+        target_compile_definitions(test_documents PRIVATE LISA_HAVE_PDFIUM)
+    endif()
+    add_test(NAME test_documents
+             COMMAND test_documents ${CMAKE_BINARY_DIR}/scratch ${CMAKE_SOURCE_DIR}/tests/fixtures)
 
     add_executable(test_sqlite tests/test_sqlite.c)
     target_link_libraries(test_sqlite PRIVATE lisa_core lisa_sqlite lisa_unity)
