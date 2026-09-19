@@ -38,7 +38,7 @@
 
 #include <stdint.h>
 
-#define LISA_STORE_FORMAT_VERSION 2   /* database format; v1 is migrated on open */
+#define LISA_STORE_FORMAT_VERSION 3   /* database format; older versions are migrated on open */
 
 #define LISA_STORE_OK          0
 #define LISA_STORE_EINVAL     -1   /* invalid argument */
@@ -216,5 +216,31 @@ typedef int (*lisa_store_doc_fn)(void* user, const lisa_store_doc_t* doc);
  */
 int lisa_store_doc_list(lisa_store_t* store, const char* path_prefix,
                         lisa_store_doc_fn fn, void* user);
+
+/* ---- keyword search (format v3) --------------------------------------- */
+
+typedef struct {
+    uint64_t id;     /* chunk ID */
+    int64_t  slot;   /* its slot in the database's current state */
+    double   score;  /* BM25 relevance; higher is better */
+} lisa_store_kw_hit_t;
+
+/*
+ * Full-text search of chunk text (FTS5, BM25). Each word of `text` is
+ * matched as a term (any word may match); punctuation and query syntax in
+ * `text` are treated literally. Optional path_prefix restricts results
+ * to documents whose source_path starts with it. Writes up to `limit`
+ * hits into out, best first; *n_out receives the count (0 if `text` has
+ * nothing searchable).
+ */
+int lisa_store_keyword_search(lisa_store_t* store, const char* text, const char* path_prefix,
+                              int64_t limit, lisa_store_kw_hit_t* out, int64_t* n_out);
+
+/*
+ * Set mask[slot] = 1 for live slots (in this handle's view) whose chunk
+ * comes from a document under path_prefix, and 0 elsewhere. mask has
+ * n_slots entries (lisa_store_view).
+ */
+int lisa_store_prefix_mask(lisa_store_t* store, const char* path_prefix, uint8_t* mask);
 
 #endif /* LISA_STORE_H */

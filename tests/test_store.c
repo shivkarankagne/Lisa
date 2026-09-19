@@ -525,23 +525,35 @@ static void test_replace_doc_and_records(void) {
     lisa_store_close(s);
 }
 
-/* Make a v2 collection look exactly like format v1 on disk. */
-static void downgrade_to_v1(const char* dir) {
+/* Make a current collection look exactly like an older format on disk. */
+static void downgrade_to(const char* dir, int version) {
     char* db = lisa_path_join(dir, "meta.sqlite");
     sqlite3* h = NULL;
     TEST_ASSERT_EQUAL_INT(SQLITE_OK, sqlite3_open(db, &h));
+    /* v3 -> v2: no full-text index. */
     TEST_ASSERT_EQUAL_INT(SQLITE_OK, sqlite3_exec(h,
-        "DROP TABLE documents;"
-        "ALTER TABLE chunks DROP COLUMN page;"
-        "UPDATE meta SET value = 1 WHERE key = 'format_version';", NULL, NULL, NULL));
+        "DROP TRIGGER chunks_fts_ai; DROP TRIGGER chunks_fts_ad; DROP TRIGGER chunks_fts_au;"
+        "DROP TABLE chunks_fts;", NULL, NULL, NULL));
+    if (version < 2) {
+        /* v2 -> v1: no documents table, no page column. */
+        TEST_ASSERT_EQUAL_INT(SQLITE_OK, sqlite3_exec(h,
+            "DROP TABLE documents; ALTER TABLE chunks DROP COLUMN page;", NULL, NULL, NULL));
+    }
+    char sql[96];
+    snprintf(sql, sizeof(sql), "UPDATE meta SET value = %d WHERE key = 'format_version';", version);
+    TEST_ASSERT_EQUAL_INT(SQLITE_OK, sqlite3_exec(h, sql, NULL, NULL, NULL));
     sqlite3_close(h);
     free(db);
+}
+
+static void downgrade_to_v1(const char* dir) {
+    downgrade_to(dir, 1);
 }
 
 static int count_backup(void* user, const char* path, const lisa_file_info_t* info) {
     (void)info;
     const char* base = strrchr(path, '/');
-    if (base && strncmp(base + 1, "meta.v1-backup-", 15) == 0) (*(int*)user)++;
+    if (base && strncmp(base + 1, "meta.v", 6) == 0 && strstr(base, "-backup-")) (*(int*)user)++;
     return 0;
 }
 
@@ -590,6 +602,91 @@ static void test_migrate_format_v1_to_v2(void) {
     TEST_ASSERT_EQUAL_INT(LISA_STORE_EFORMAT, lisa_store_open(g_dir, LISA_STORE_READ, NULL, &s));
 }
 
+/* Keyword search over chunk texts (format v3). */
+static void add_text(lisa_store_t* s, const char* doc, const char* text, uint64_t vec_id) {
+    float v[DIM];
+    vec_for(vec_id, v);
+    lisa_store_chunk_t c = chunk_for(doc, 0);
+    c.text = (char*)text;
+    c.source_path = (char*)doc;
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_insert(s, 1, v, &c, NULL));
+}
+
+static void test_keyword_search(void) {
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_create(g_dir, MODEL, DIM));
+    lisa_store_t* s = NULL;
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_open(g_dir, LISA_STORE_WRITE, NULL, &s));
+    add_text(s, "/docs/pump.txt", "Replace the pump bearing if vibration exceeds 40 Hz.", 0);
+    add_text(s, "/docs/leave.md", "Employees get 20 days of annual leave.", 1);
+    add_text(s, "/docs/pump2.txt", "Pump pump pump maintenance schedule.", 2);
+    add_text(s, "/other/rbi.txt", "आरबीआई ने रेपो दर बढ़ाई।", 3);
+
+    lisa_store_kw_hit_t h[8];
+    int64_t n = 0;
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_keyword_search(s, "pump", NULL, 8, h, &n));
+    TEST_ASSERT_EQUAL_INT64(2, n);
+    TEST_ASSERT_EQUAL_UINT64(2, h[0].id);          /* more occurrences ranks first */
+    TEST_ASSERT_TRUE(h[0].score >= h[1].score);
+
+    /* Free text with punctuation and FTS syntax is safe; any word may match. */
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK,
+        lisa_store_keyword_search(s, "How many days of \"annual\" leave? (NEAR OR *)", NULL, 8, h, &n));
+    TEST_ASSERT_TRUE(n >= 1);
+    TEST_ASSERT_EQUAL_UINT64(1, h[0].id);
+
+    /* Hindi, prefix filter, nothing searchable, limit. */
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_keyword_search(s, "रेपो दर?", NULL, 8, h, &n));
+    TEST_ASSERT_EQUAL_INT64(1, n);
+    TEST_ASSERT_EQUAL_UINT64(3, h[0].id);
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_keyword_search(s, "रेपो", "/docs/", 8, h, &n));
+    TEST_ASSERT_EQUAL_INT64(0, n);
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_keyword_search(s, "?! ...", NULL, 8, h, &n));
+    TEST_ASSERT_EQUAL_INT64(0, n);
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_keyword_search(s, "pump", NULL, 1, h, &n));
+    TEST_ASSERT_EQUAL_INT64(1, n);
+
+    /* Index follows deletes and document replacement. */
+    uint64_t gone = 2;
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_delete(s, 1, &gone));
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_keyword_search(s, "pump", NULL, 8, h, &n));
+    TEST_ASSERT_EQUAL_INT64(1, n);
+    TEST_ASSERT_EQUAL_UINT64(0, h[0].id);
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_compact(s));   /* slot renumbering keeps the index */
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_keyword_search(s, "vibration", NULL, 8, h, &n));
+    TEST_ASSERT_EQUAL_INT64(1, n);
+    TEST_ASSERT_EQUAL_UINT64(0, h[0].id);
+
+    /* Prefix mask over the handle's view. */
+    lisa_store_view_t v;
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_view(s, &v));
+    uint8_t mask[8];
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_prefix_mask(s, "/docs/", mask));
+    int in_docs = 0;
+    for (int64_t i = 0; i < v.n_slots; i++) in_docs += mask[i];
+    TEST_ASSERT_EQUAL_INT(2, in_docs);   /* pump.txt, leave.md (pump2 deleted) */
+    lisa_store_close(s);
+}
+
+static void test_migrate_format_v2_to_v3_builds_index(void) {
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_create(g_dir, MODEL, DIM));
+    lisa_store_t* s = NULL;
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_open(g_dir, LISA_STORE_WRITE, NULL, &s));
+    add_text(s, "/docs/pump.txt", "Pump bearing vibration.", 0);
+    lisa_store_close(s);
+    downgrade_to(g_dir, 2);
+
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_open(g_dir, LISA_STORE_WRITE, NULL, &s));
+    lisa_store_kw_hit_t h[2];
+    int64_t n = 0;
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_keyword_search(s, "vibration", NULL, 2, h, &n));
+    TEST_ASSERT_EQUAL_INT64(1, n);         /* existing text indexed by the migration */
+    add_text(s, "/docs/new.txt", "New vibration note.", 1);
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_keyword_search(s, "vibration", NULL, 2, h, &n));
+    TEST_ASSERT_EQUAL_INT64(2, n);         /* and new text through the triggers */
+    lisa_store_close(s);
+    TEST_ASSERT_EQUAL_INT(1, count_backups(g_dir));
+}
+
 int main(int argc, char** argv) {
     if (argc != 2) {
         fprintf(stderr, "usage: %s <scratch_dir>\n", argv[0]);
@@ -612,5 +709,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_migrate_v1_preserves_order_as_ids);
     RUN_TEST(test_replace_doc_and_records);
     RUN_TEST(test_migrate_format_v1_to_v2);
+    RUN_TEST(test_keyword_search);
+    RUN_TEST(test_migrate_format_v2_to_v3_builds_index);
     return UNITY_END() == 0 ? 0 : 1;
 }

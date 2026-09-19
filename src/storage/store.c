@@ -281,6 +281,26 @@ static int open_db(const char* dir, sqlite3** out) {
     ");" \
     "CREATE INDEX documents_source_path ON documents(source_path);"
 
+/*
+ * v3: full-text index over chunk text (external content = chunks), kept
+ * in sync by triggers so every write path updates it. unicode61 handles
+ * Indic scripts (combining marks stay inside words).
+ */
+#define FTS_SCHEMA \
+    "CREATE VIRTUAL TABLE chunks_fts USING fts5(" \
+    "  text, content='chunks', content_rowid='id'," \
+    "  tokenize='unicode61 remove_diacritics 2');" \
+    "CREATE TRIGGER chunks_fts_ai AFTER INSERT ON chunks BEGIN" \
+    "  INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text);" \
+    "END;" \
+    "CREATE TRIGGER chunks_fts_ad AFTER DELETE ON chunks BEGIN" \
+    "  INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);" \
+    "END;" \
+    "CREATE TRIGGER chunks_fts_au AFTER UPDATE OF text ON chunks BEGIN" \
+    "  INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);" \
+    "  INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text);" \
+    "END;"
+
 static const char* k_schema =
     "CREATE TABLE meta ("
     "  key   TEXT PRIMARY KEY,"
@@ -299,7 +319,8 @@ static const char* k_schema =
     "  page         INTEGER NOT NULL DEFAULT 0"
     ");"
     "CREATE INDEX chunks_doc_id ON chunks(doc_id);"
-    DOCUMENTS_SCHEMA;
+    DOCUMENTS_SCHEMA
+    FTS_SCHEMA;
 
 /* ---- in-memory slot table --------------------------------------------- */
 
@@ -434,7 +455,7 @@ static int migrate_if_needed(lisa_store_t* s) {
     int rc = meta_get_int(s->db, "format_version", &version);
     if (rc != LISA_STORE_OK) return rc;
     if (version == LISA_STORE_FORMAT_VERSION) return LISA_STORE_OK;
-    if (version != 1) return LISA_STORE_EFORMAT;
+    if (version < 1 || version > LISA_STORE_FORMAT_VERSION) return LISA_STORE_EFORMAT;
 
     lisa_lock_t* temp = NULL;
     if (s->lock == NULL) {
@@ -447,8 +468,9 @@ static int migrate_if_needed(lisa_store_t* s) {
     }
 
     /* Backup: a consistent copy of the old database, never overwritten. */
-    char name[64];
-    snprintf(name, sizeof(name), "meta.v1-backup-%lld.sqlite", (long long)lisa_time_monotonic_ns());
+    char name[80];
+    snprintf(name, sizeof(name), "meta.v%lld-backup-%lld.sqlite",
+             (long long)version, (long long)lisa_time_monotonic_ns());
     char* backup = lisa_path_join(s->dir, name);
     sqlite3_stmt* st = NULL;
     if (backup == NULL) rc = LISA_STORE_ENOMEM;
@@ -460,10 +482,14 @@ static int migrate_if_needed(lisa_store_t* s) {
     sqlite3_finalize(st);
     free(backup);
 
+    /* All steps from `version` to the current format, in one transaction. */
     if (rc == LISA_STORE_OK) {
         rc = exec(s->db, "BEGIN IMMEDIATE;");
-        if (rc == LISA_STORE_OK) rc = exec(s->db,
-            "ALTER TABLE chunks ADD COLUMN page INTEGER NOT NULL DEFAULT 0;" DOCUMENTS_SCHEMA);
+        if (rc == LISA_STORE_OK && version < 2)
+            rc = exec(s->db, "ALTER TABLE chunks ADD COLUMN page INTEGER NOT NULL DEFAULT 0;"
+                             DOCUMENTS_SCHEMA);
+        if (rc == LISA_STORE_OK && version < 3)
+            rc = exec(s->db, FTS_SCHEMA "INSERT INTO chunks_fts(chunks_fts) VALUES ('rebuild');");
         if (rc == LISA_STORE_OK) rc = meta_set_int(s->db, "format_version", LISA_STORE_FORMAT_VERSION);
         if (rc == LISA_STORE_OK) rc = exec(s->db, "COMMIT;");
         else rollback(s->db);
@@ -1146,6 +1172,107 @@ int lisa_store_view(lisa_store_t* s, lisa_store_view_t* out) {
     out->live = s->live;
     out->slot_ids = s->slot_ids;
     return LISA_STORE_OK;
+}
+
+/* ==== Keyword search (format v3) ======================================== */
+
+/*
+ * Turn free text into an FTS5 query: each whitespace-separated word
+ * becomes a quoted phrase (so punctuation and FTS5 operators in user
+ * text are harmless), joined with OR. Words with no letters or digits
+ * are dropped. Returns NULL if nothing searchable remains.
+ */
+static char* fts_query(const char* text) {
+    size_t n = strlen(text);
+    char* out = (char*)malloc(n * 3 + 16);
+    if (out == NULL) return NULL;
+    size_t o = 0;
+    int terms = 0;
+    for (size_t i = 0; i < n;) {
+        while (i < n && (text[i] == ' ' || text[i] == '\t' || text[i] == '\n' || text[i] == '\r')) i++;
+        size_t start = i;
+        while (i < n && !(text[i] == ' ' || text[i] == '\t' || text[i] == '\n' || text[i] == '\r')) i++;
+        int useful = 0;
+        for (size_t k = start; k < i; k++) {
+            unsigned char c = (unsigned char)text[k];
+            if (c >= 0x80 || (c >= '0' && c <= '9') || ((c | 0x20) >= 'a' && (c | 0x20) <= 'z')) useful = 1;
+        }
+        if (!useful) continue;
+        if (terms++) {
+            memcpy(out + o, " OR ", 4);
+            o += 4;
+        }
+        out[o++] = '"';
+        for (size_t k = start; k < i; k++) {
+            if (text[k] == '"') out[o++] = '"';  /* escape by doubling */
+            out[o++] = text[k];
+        }
+        out[o++] = '"';
+    }
+    out[o] = '\0';
+    if (terms == 0) {
+        free(out);
+        return NULL;
+    }
+    return out;
+}
+
+int lisa_store_keyword_search(lisa_store_t* s, const char* text, const char* path_prefix,
+                              int64_t limit, lisa_store_kw_hit_t* out, int64_t* n_out) {
+    if (n_out) *n_out = 0;
+    if (s == NULL || text == NULL || limit < 1 || out == NULL || n_out == NULL) return LISA_STORE_EINVAL;
+    char* q = fts_query(text);
+    if (q == NULL) return LISA_STORE_OK;  /* nothing searchable: no hits */
+    sqlite3_stmt* st = NULL;
+    int rc = LISA_STORE_OK;
+    if (sqlite3_prepare_v2(s->db,
+            "SELECT c.id, c.slot, bm25(chunks_fts) FROM chunks_fts"
+            " JOIN chunks c ON c.id = chunks_fts.rowid"
+            " WHERE chunks_fts MATCH ?1"
+            "   AND (?2 IS NULL OR substr(c.source_path, 1, length(?2)) = ?2)"
+            " ORDER BY bm25(chunks_fts) LIMIT ?3;", -1, &st, NULL) != SQLITE_OK) {
+        free(q);
+        return LISA_STORE_EIO;
+    }
+    sqlite3_bind_text(st, 1, q, -1, SQLITE_STATIC);
+    if (path_prefix) sqlite3_bind_text(st, 2, path_prefix, -1, SQLITE_STATIC);
+    else sqlite3_bind_null(st, 2);
+    sqlite3_bind_int64(st, 3, limit);
+    int64_t n = 0;
+    int step;
+    while ((step = sqlite3_step(st)) == SQLITE_ROW) {
+        out[n].id = (uint64_t)sqlite3_column_int64(st, 0);
+        out[n].slot = sqlite3_column_int64(st, 1);
+        out[n].score = -sqlite3_column_double(st, 2);  /* bm25: lower is better */
+        n++;
+    }
+    if (step != SQLITE_DONE) rc = LISA_STORE_EIO;
+    sqlite3_finalize(st);
+    free(q);
+    *n_out = n;
+    return rc;
+}
+
+int lisa_store_prefix_mask(lisa_store_t* s, const char* path_prefix, uint8_t* mask) {
+    if (s == NULL || path_prefix == NULL || mask == NULL) return LISA_STORE_EINVAL;
+    if (s->slot_count > 0) memset(mask, 0, (size_t)s->slot_count);
+    sqlite3_stmt* st = NULL;
+    if (sqlite3_prepare_v2(s->db,
+            "SELECT id, slot FROM chunks WHERE substr(source_path, 1, length(?1)) = ?1;",
+            -1, &st, NULL) != SQLITE_OK)
+        return LISA_STORE_EIO;
+    sqlite3_bind_text(st, 1, path_prefix, -1, SQLITE_STATIC);
+    int step;
+    while ((step = sqlite3_step(st)) == SQLITE_ROW) {
+        int64_t id = sqlite3_column_int64(st, 0);
+        int64_t slot = sqlite3_column_int64(st, 1);
+        /* Only slots this handle's view agrees on (the database may be newer). */
+        if (slot >= 0 && slot < s->slot_count && s->live[slot] && s->slot_ids[slot] == (uint64_t)id)
+            mask[slot] = 1;
+    }
+    int rc = step == SQLITE_DONE ? LISA_STORE_OK : LISA_STORE_EIO;
+    sqlite3_finalize(st);
+    return rc;
 }
 
 int lisa_store_migrate_v1(const char* src_dir, const char* dst_dir,

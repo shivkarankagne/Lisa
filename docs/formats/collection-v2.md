@@ -1,7 +1,7 @@
 # Collection format v2
 
 Storage v2 collection directory, as written by `src/storage/store.c`.
-Database format version: **2** (`LISA_STORE_FORMAT_VERSION`); vector file
+Database format version: **3** (`LISA_STORE_FORMAT_VERSION`); vector file
 format version: **1**. Any change to this
 document requires a version bump and a migration (plan §7, upgrade rule 3).
 
@@ -52,13 +52,34 @@ CREATE TABLE documents (
   message      TEXT    NOT NULL
 );
 CREATE INDEX documents_source_path ON documents(source_path);
+
+-- v3: keyword index over chunks.text (external content, kept in step by triggers)
+CREATE VIRTUAL TABLE chunks_fts USING fts5(
+  text, content='chunks', content_rowid='id',
+  tokenize='unicode61 remove_diacritics 2');
+CREATE TRIGGER chunks_fts_ai AFTER INSERT ON chunks BEGIN
+  INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text);
+END;
+CREATE TRIGGER chunks_fts_ad AFTER DELETE ON chunks BEGIN
+  INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);
+END;
+CREATE TRIGGER chunks_fts_au AFTER UPDATE OF text ON chunks BEGIN
+  INSERT INTO chunks_fts(chunks_fts, rowid, text) VALUES ('delete', old.id, old.text);
+  INSERT INTO chunks_fts(rowid, text) VALUES (new.id, new.text);
+END;
 ```
+
+`chunks_fts` rowids are chunk IDs. The `unicode61` tokenizer splits on
+Unicode word boundaries, so Devanagari and other scripts are indexed.
+Keyword queries quote every whitespace-separated word of the user's text
+and OR them (user text never reaches FTS5 query syntax), ranked by
+`bm25()`.
 
 `meta` keys:
 
 | Key | Type | Meaning |
 | :--- | :--- | :--- |
-| `format_version` | integer | `2` |
+| `format_version` | integer | `3` |
 | `embedding_model` | text | Model that produced the vectors; fixed at creation |
 | `dim` | integer | Vector dimension, 1..65536; fixed at creation |
 | `next_id` | integer | Next chunk ID to assign (IDs start at 0) |
@@ -132,16 +153,20 @@ file is a leftover. Leftovers are removed when a writer next opens.
 Readers that mapped the old file keep a valid mapping (POSIX keeps an
 unlinked, mapped file alive) until they refresh.
 
-## Migration from database format 1
+## Migration from older database formats
 
-Opening a format-1 collection (any mode) upgrades it in place, holding
-the writer lock (taken briefly by read-only opens; `EBUSY` if another
-writer holds it):
+Opening a format-1 or format-2 collection (any mode) upgrades it in
+place, holding the writer lock (taken briefly by read-only opens;
+`EBUSY` if another writer holds it):
 
-1. `VACUUM INTO 'meta.v1-backup-<n>.sqlite'` — a consistent copy of the
-   old database, never overwritten.
-2. One transaction: `ALTER TABLE chunks ADD COLUMN page ... DEFAULT 0`,
-   create `documents`, set `format_version = 2`.
+1. `VACUUM INTO 'meta.v<old>-backup-<n>.sqlite'` — a consistent copy of
+   the old database, never overwritten.
+2. One transaction applying every step from the old version:
+   - from 1: `ALTER TABLE chunks ADD COLUMN page ... DEFAULT 0`, create
+     `documents`;
+   - from 2 (or 1): create `chunks_fts` and its triggers, then
+     `INSERT INTO chunks_fts(chunks_fts) VALUES ('rebuild')`;
+   - set `format_version = 3`.
 
 A `format_version` newer than this build is rejected (`EFORMAT`).
 
@@ -150,6 +175,6 @@ A `format_version` newer than this build is rejected (`EFORMAT`).
 - v1 / v1.1 collections (`header.bin` + `vectors.bin`, see
   `src/storage/storage.h`) are not opened by v2; convert them with
   `lisa_store_migrate_v1()`, which gives old vector `i` the ID `i`.
-- A `format_version` newer than 2, a bad magic, byte-order mark,
+- A `format_version` newer than 3, a bad magic, byte-order mark,
   dimension, or generation in the vector header, or a short vector file,
   is rejected with `LISA_STORE_EFORMAT`.
