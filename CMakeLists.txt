@@ -135,6 +135,7 @@ add_library(lisa_core STATIC
     src/documents/documents.c
     src/documents/markdown.c
     src/documents/chunk.c
+    src/ingest/ingest.c
     src/platform/platform_posix.c
     src/kernels/registry.c
     src/kernels/kernels_scalar.c
@@ -166,6 +167,7 @@ target_link_libraries(lisa PRIVATE lisa_core)
 
 if(LISA_BUILD_TESTS)
     enable_testing()
+    set(LISA_MODELS_DIR "${CMAKE_SOURCE_DIR}/models" CACHE PATH "Directory with the default model files")
 
     add_library(lisa_unity STATIC third_party/unity/unity.c)
     target_include_directories(lisa_unity PUBLIC third_party/unity)
@@ -212,11 +214,16 @@ if(LISA_BUILD_TESTS)
     add_test(NAME test_documents
              COMMAND test_documents ${CMAKE_BINARY_DIR}/scratch ${CMAKE_SOURCE_DIR}/tests/fixtures)
 
+    add_executable(test_ingest tests/test_ingest.c)
+    target_link_libraries(test_ingest PRIVATE lisa_core lisa_unity)
+    add_test(NAME test_ingest
+             COMMAND test_ingest ${CMAKE_BINARY_DIR}/scratch ${CMAKE_SOURCE_DIR}/tests/fixtures ${LISA_MODELS_DIR})
+    set_tests_properties(test_ingest PROPERTIES TIMEOUT 1800)
+
     add_executable(test_sqlite tests/test_sqlite.c)
     target_link_libraries(test_sqlite PRIVATE lisa_core lisa_sqlite lisa_unity)
     add_test(NAME test_sqlite COMMAND test_sqlite ${CMAKE_BINARY_DIR}/scratch)
 
-    set(LISA_MODELS_DIR "${CMAKE_SOURCE_DIR}/models" CACHE PATH "Directory with the default model files")
     add_executable(test_models tests/test_models.c)
     target_link_libraries(test_models PRIVATE lisa_core llama lisa_unity)
     add_test(NAME test_models COMMAND test_models ${CMAKE_BINARY_DIR}/scratch ${LISA_MODELS_DIR})
