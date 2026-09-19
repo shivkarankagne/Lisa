@@ -23,4 +23,5 @@ binary. Rules (see `CLAUDE.md` and `LISA_COMPLETION_PLAN.md` §5):
 | [yyjson](yyjson/INTAKE.md) | 0.12.0 | MIT | JSON for HTTP, CLI `--json`, config (W9) |
 | [civetweb](civetweb/INTAKE.md) | v1.16 | MIT (+ zlib-style md5, public-domain sha1) | Local HTTP server (W9) |
 | [webview](webview/INTAKE.md) | 0.12.0 | MIT | Native GUI window (W10) |
+| [miniz](miniz/INTAKE.md) | 3.1.2 | MIT | Reading .docx (zip) files (W5b) |
 | [unity](unity/INTAKE.md) | 2.7.0 | MIT | C unit tests (test-only, not shipped) |
