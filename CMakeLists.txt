@@ -13,7 +13,7 @@
 #   ctest --test-dir build-asan --output-on-failure
 
 cmake_minimum_required(VERSION 3.20)
-project(lisa VERSION 0.2.0 LANGUAGES C CXX ASM)
+project(lisa VERSION 0.3.0 LANGUAGES C CXX ASM)
 
 option(LISA_SANITIZE         "Build with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
 option(LISA_BUILD_TESTS      "Build tests"      ON)
@@ -143,6 +143,9 @@ add_library(lisa_core STATIC
     src/kernels/arm64/l2_neon.c
     src/retrieval/retrieval_scalar.c
     src/retrieval/retrieval_search.c
+    src/retrieval/fusion.c
+    src/retrieval/index.c
+    src/api/lisa_search.c
     src/storage/storage.c
     src/storage/store.c
     src/kernels/arm64/lisa_asm_wrapper.c
@@ -226,6 +229,11 @@ if(LISA_BUILD_TESTS)
     add_test(NAME test_ingest_api
              COMMAND test_ingest_api ${CMAKE_BINARY_DIR}/scratch ${CMAKE_SOURCE_DIR}/tests/fixtures ${LISA_MODELS_DIR})
     set_tests_properties(test_ingest_api PROPERTIES TIMEOUT 1800)
+
+    add_executable(test_query tests/test_query.c)
+    target_link_libraries(test_query PRIVATE lisa_core lisa_unity)
+    add_test(NAME test_query COMMAND test_query ${CMAKE_BINARY_DIR}/scratch ${LISA_MODELS_DIR})
+    set_tests_properties(test_query PROPERTIES TIMEOUT 1800)
 
     add_executable(test_sqlite tests/test_sqlite.c)
     target_link_libraries(test_sqlite PRIVATE lisa_core lisa_sqlite lisa_unity)

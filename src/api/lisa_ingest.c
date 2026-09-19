@@ -18,7 +18,7 @@
  * The identity recorded in a collection for an embedding model: the LISA
  * profile id for known models, else "gguf:" + the model's own name.
  */
-static void model_id(const lisa_model_t* m, char* buf, size_t n) {
+void lisa_api_model_id(const lisa_model_t* m, char* buf, size_t n) {
     lm_info_t li;
     lm_get_info(m->lm, &li);
     if (strcmp(li.profile_id, "generic") != 0) snprintf(buf, n, "%s", li.profile_id);
@@ -26,7 +26,7 @@ static void model_id(const lisa_model_t* m, char* buf, size_t n) {
 }
 
 /* Check that dim is usable with this embedding model. */
-static int check_dim(const lisa_model_t* m, int64_t dim) {
+int lisa_api_check_dim(const lisa_model_t* m, int64_t dim) {
     lm_info_t li;
     lm_get_info(m->lm, &li);
     if (!li.is_embedding) return LISA_E_WRONG_MODEL_KIND;
@@ -43,10 +43,10 @@ int lisa_collection_create_for_model(lisa_context_t* ctx, const char* path,
     lm_get_info(model->lm, &li);
     if (!li.is_embedding) return LISA_E_WRONG_MODEL_KIND;
     if (dim == 0) dim = li.embedding_dim;
-    int rc = check_dim(model, dim);
+    int rc = lisa_api_check_dim(model, dim);
     if (rc != LISA_OK) return rc;
     char id[256];
-    model_id(model, id, sizeof(id));
+    lisa_api_model_id(model, id, sizeof(id));
     return lisa_collection_create(ctx, path, id, dim);
 }
 
@@ -203,10 +203,10 @@ int lisa_ingest_start(lisa_collection_t* coll, lisa_model_t* model,
 
     int rc = LISA_OK;
     char id[256];
-    model_id(model, id, sizeof(id));
+    lisa_api_model_id(model, id, sizeof(id));
     int64_t dim = lisa_store_dim(coll->store);
     if (strcmp(id, lisa_store_model(coll->store)) != 0) rc = LISA_E_MODEL_MISMATCH;
-    else rc = check_dim(model, dim);
+    else rc = lisa_api_check_dim(model, dim);
     if (rc == LISA_E_INVALID_ARGUMENT) rc = LISA_E_MODEL_MISMATCH;  /* dim the model cannot produce */
 
     lisa_ingest_job_t* j = NULL;

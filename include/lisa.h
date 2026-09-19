@@ -53,9 +53,9 @@ extern "C" {
 /* ==== Version ========================================================= */
 
 #define LISA_VERSION_MAJOR 0
-#define LISA_VERSION_MINOR 2
+#define LISA_VERSION_MINOR 3
 #define LISA_VERSION_PATCH 0
-#define LISA_VERSION_STRING "0.2.0"
+#define LISA_VERSION_STRING "0.3.0"
 
 /*
  * Version of the linked library (may differ from the header's macros if
@@ -647,6 +647,62 @@ typedef int (*lisa_document_fn)(void* user, const lisa_document_t* doc);
 /* Visit documents whose path starts with path_prefix (all if NULL), by path. */
 LISA_API int lisa_collection_documents(lisa_collection_t* coll, const char* path_prefix,
                                        lisa_document_fn fn, void* user);
+
+/* ==== Hybrid search (since 0.3) ========================================= */
+/*
+ * Search by meaning (vector), by words (keyword, BM25), or both fused
+ * with reciprocal rank fusion. Filters apply to both lists: an optional
+ * path prefix, and the retrieval filter extension (with `principal`).
+ */
+
+typedef enum lisa_search_mode {
+    LISA_SEARCH_HYBRID  = 0,   /* use every input given (vector and/or text) */
+    LISA_SEARCH_VECTOR  = 1,   /* vector only */
+    LISA_SEARCH_KEYWORD = 2    /* keyword only */
+} lisa_search_mode;
+
+typedef struct lisa_query {
+    size_t                  struct_size;
+    const char*             text;            /* words to match; may be NULL */
+    const float*            vector;          /* query embedding (collection dim); may be NULL */
+    lisa_search_mode        mode;            /* default HYBRID */
+    int64_t                 top_k;           /* 1..10000; default 5 */
+    float                   vector_weight;   /* fusion weights; default 1.0 each */
+    float                   keyword_weight;
+    const char*             path_prefix;     /* only documents under this path; NULL: all */
+    const lisa_principal_t* principal;       /* passed to the retrieval filter */
+} lisa_query_t;
+
+#define LISA_QUERY_INIT \
+    { sizeof(lisa_query_t), NULL, NULL, LISA_SEARCH_HYBRID, 5, 1.0f, 1.0f, NULL, NULL }
+
+typedef struct lisa_scored_hit {
+    uint64_t id;             /* chunk ID */
+    double   score;          /* fused relevance; higher is better */
+    float    distance;       /* squared L2 if found by vector search, else -1 */
+    double   keyword_score;  /* BM25 if found by keyword search, else 0 */
+    int32_t  vector_rank;    /* 1-based rank in the vector list; 0 if absent */
+    int32_t  keyword_rank;   /* 1-based rank in the keyword list; 0 if absent */
+} lisa_scored_hit_t;
+
+/*
+ * Run a query. Writes up to min(top_k, capacity) hits, best first, into
+ * hits and their number into *out_count. The mode's required inputs must
+ * be present (LISA_E_INVALID_ARGUMENT otherwise).
+ */
+LISA_API int lisa_collection_query(lisa_collection_t* coll, const lisa_query_t* query,
+                                   lisa_scored_hit_t* hits, int64_t capacity,
+                                   int64_t* out_count);
+
+/*
+ * Embed `text` as a question with embed_model (the model the collection
+ * was created for, else LISA_E_MODEL_MISMATCH) and run a hybrid query
+ * with it. options may be NULL; its text/vector fields are ignored.
+ */
+LISA_API int lisa_collection_query_text(lisa_collection_t* coll, lisa_model_t* embed_model,
+                                        const char* text, const lisa_query_t* options,
+                                        lisa_scored_hit_t* hits, int64_t capacity,
+                                        int64_t* out_count);
 
 /* ==== Memory returned by LISA ========================================= */
 

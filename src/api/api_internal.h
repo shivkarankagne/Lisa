@@ -72,4 +72,8 @@ void lisa_api_audit(const lisa_context_t* ctx, lisa_audit_action action, int sta
                     const lisa_principal_t* principal, const char* path,
                     int64_t count, const uint64_t* ids);
 
+/* Embedding-model identity recorded in collections, and dim check (lisa_ingest.c). */
+void lisa_api_model_id(const lisa_model_t* m, char* buf, size_t n);
+int  lisa_api_check_dim(const lisa_model_t* m, int64_t dim);
+
 #endif /* LISA_API_INTERNAL_H */
