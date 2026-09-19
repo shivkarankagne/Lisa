@@ -16,7 +16,7 @@
 #include "../platform/platform.h"
 
 #define DEFAULT_CONTEXT   4096
-#define EMBED_CONTEXT     2048
+#define EMBED_CONTEXT     8192   /* chunks are <= 1,500 chars; dense scripts can exceed 2,048 tokens */
 #define PROMPT_BATCH      512
 #define PENALTY_LAST_N    64
 
