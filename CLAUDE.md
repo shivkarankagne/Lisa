@@ -36,8 +36,8 @@ W0 (parallel, anytime)
 W1 → W2 → W3 → W4, W5 (parallel) → W6, W7 → W8 → W9 → W10, W11 → W12
 ```
 
-W1–W4 are done (reports `LISA_REPORT_AND_UPDATE_002.md`–`_005.md`);
-next is **W5**. Check the plan's acceptance criteria for the package you
+W1–W5 are done (reports `LISA_REPORT_AND_UPDATE_002.md`–`_006.md`);
+next is **W6**. Check the plan's acceptance criteria for the package you
 are on; a package is not done until every criterion is met.
 
 ## Non-negotiable rules
@@ -199,6 +199,7 @@ After changing code:
 
 ## Build and test
 
+    scripts/build_pdfium.sh              # once: static PDFium into .deps/ (needs Xcode)
     cmake -S . -B build                  # Release, -O2
     cmake --build build
     ctest --test-dir build --output-on-failure
@@ -215,6 +216,8 @@ After changing code:
   ignored, not passed.
 - Programs must free every loaded model before exiting: llama.cpp aborts
   at exit otherwise.
+- After a compiler or Xcode change, delete `build/` and `build-asan/`
+  (precompiled headers go stale).
 
 ## Known defects (plan §4)
 
@@ -240,6 +243,8 @@ Current:
     include/lisa.h      public API (W3)
     src/api/            lisa.h implementation (lisa_api.c); hand-written HTTP server (replaced in W9)
     src/models/         model runtime over llama.cpp (only code that includes llama.h)
+    src/documents/      extraction (txt, md, pdf), normalisation, chunker
+    scripts/            build_pdfium.sh
     third_party/        sqlite, llama.cpp, unity (see third_party/README.md)
     models/             downloaded model files (gitignored; see docs/models.md)
     docs/formats/       on-disk format specs

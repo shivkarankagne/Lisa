@@ -25,7 +25,10 @@ Inference, Context, RAG/Agents, Security) are not started.
 
 ## Build
 
-Requires CMake 3.20+ and Apple clang on an ARM64 Mac.
+Requires CMake 3.20+ and full Xcode on an ARM64 Mac. Build PDFium once
+(static library, not committed):
+
+    scripts/build_pdfium.sh
 
     cmake -S . -B build
     cmake --build build
