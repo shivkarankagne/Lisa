@@ -97,6 +97,19 @@ add_library(lisa_md4c STATIC third_party/md4c/md4c.c)
 target_include_directories(lisa_md4c PUBLIC third_party/md4c)
 target_compile_options(lisa_md4c PRIVATE -w)
 
+add_library(lisa_yyjson STATIC third_party/yyjson/yyjson.c)
+target_include_directories(lisa_yyjson PUBLIC third_party/yyjson)
+target_compile_options(lisa_yyjson PRIVATE -w)
+
+# CivetWeb (third_party/civetweb/INTAKE.md): local HTTP only; no TLS, CGI,
+# file serving, or caching.
+add_library(lisa_civetweb STATIC third_party/civetweb/src/civetweb.c)
+target_include_directories(lisa_civetweb PUBLIC third_party/civetweb/include)
+target_compile_definitions(lisa_civetweb PUBLIC NO_SSL NO_CGI NO_FILES NO_CACHING)
+target_compile_options(lisa_civetweb PRIVATE -w)
+find_package(Threads REQUIRED)
+target_link_libraries(lisa_civetweb PUBLIC Threads::Threads)
+
 add_library(lisa_utf8proc STATIC third_party/utf8proc/utf8proc.c)
 target_include_directories(lisa_utf8proc PUBLIC third_party/utf8proc)
 target_compile_definitions(lisa_utf8proc PUBLIC UTF8PROC_STATIC)
