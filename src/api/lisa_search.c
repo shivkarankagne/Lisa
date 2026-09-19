@@ -202,6 +202,25 @@ int lisa_collection_query(lisa_collection_t* c, const lisa_query_t* query,
     return rc;
 }
 
+int lisa_api_embed_query(lisa_collection_t* c, lisa_model_t* model, const char* text, float** out) {
+    *out = NULL;
+    char id[256];
+    lisa_api_model_id(model, id, sizeof(id));
+    int64_t dim = lisa_store_dim(c->store);
+    if (strcmp(id, lisa_store_model(c->store)) != 0 || lisa_api_check_dim(model, dim) != LISA_OK)
+        return LISA_E_MODEL_MISMATCH;
+    float* vec = (float*)ctx_alloc(c->ctx, (size_t)dim * sizeof(float));
+    if (vec == NULL) return LISA_E_NO_MEMORY;
+    const char* texts[1] = { text };
+    int rc = lisa_api_from_lm(lm_embed(model->lm, LM_EMBED_QUERY, texts, 1, vec, dim));
+    if (rc != LISA_OK) {
+        ctx_free(c->ctx, vec);
+        return rc;
+    }
+    *out = vec;
+    return LISA_OK;
+}
+
 int lisa_collection_query_text(lisa_collection_t* c, lisa_model_t* model, const char* text,
                                const lisa_query_t* options, lisa_scored_hit_t* hits,
                                int64_t capacity, int64_t* out_count) {
@@ -212,16 +231,8 @@ int lisa_collection_query_text(lisa_collection_t* c, lisa_model_t* model, const 
     if (rc != LISA_OK) return rc;
     if (API_BUSY(c) || API_BUSY(model)) return LISA_E_BUSY;
 
-    char id[256];
-    lisa_api_model_id(model, id, sizeof(id));
-    int64_t dim = lisa_store_dim(c->store);
-    if (strcmp(id, lisa_store_model(c->store)) != 0 || lisa_api_check_dim(model, dim) != LISA_OK)
-        return LISA_E_MODEL_MISMATCH;
-
-    float* vec = (float*)ctx_alloc(c->ctx, (size_t)dim * sizeof(float));
-    if (vec == NULL) return LISA_E_NO_MEMORY;
-    const char* texts[1] = { text };
-    rc = lisa_api_from_lm(lm_embed(model->lm, LM_EMBED_QUERY, texts, 1, vec, dim));
+    float* vec = NULL;
+    rc = lisa_api_embed_query(c, model, text, &vec);
     if (rc == LISA_OK) {
         q.text = text;
         q.vector = vec;

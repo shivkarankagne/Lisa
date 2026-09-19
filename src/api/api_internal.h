@@ -76,4 +76,11 @@ void lisa_api_audit(const lisa_context_t* ctx, lisa_audit_action action, int sta
 void lisa_api_model_id(const lisa_model_t* m, char* buf, size_t n);
 int  lisa_api_check_dim(const lisa_model_t* m, int64_t dim);
 
+/*
+ * Embed text as a question for collection c, after checking model is the
+ * collection's embedding model (else LISA_E_MODEL_MISMATCH). *out is
+ * ctx-allocated, lisa_store_dim(c->store) floats (lisa_search.c).
+ */
+int lisa_api_embed_query(lisa_collection_t* c, lisa_model_t* model, const char* text, float** out);
+
 #endif /* LISA_API_INTERNAL_H */

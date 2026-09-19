@@ -53,9 +53,9 @@ extern "C" {
 /* ==== Version ========================================================= */
 
 #define LISA_VERSION_MAJOR 0
-#define LISA_VERSION_MINOR 3
+#define LISA_VERSION_MINOR 4
 #define LISA_VERSION_PATCH 0
-#define LISA_VERSION_STRING "0.3.0"
+#define LISA_VERSION_STRING "0.4.0"
 
 /*
  * Version of the linked library (may differ from the header's macros if
@@ -703,6 +703,79 @@ LISA_API int lisa_collection_query_text(lisa_collection_t* coll, lisa_model_t* e
                                         const char* text, const lisa_query_t* options,
                                         lisa_scored_hit_t* hits, int64_t capacity,
                                         int64_t* out_count);
+
+/* ==== Ask: answers with citations (since 0.4) ========================= */
+/*
+ * Answer a question from a collection: retrieve (hybrid search) ->
+ * filter (similarity floor) -> rank -> dedupe -> fit the prompt budget ->
+ * generate. The answer cites passages as [n]; each citation names the
+ * document, page, offsets, and the passage text. If nothing relevant is
+ * retrieved, or the model finds no answer in the passages, the answer is
+ * LISA_NOT_FOUND_TEXT and `found` is 0.
+ */
+
+#define LISA_NOT_FOUND_TEXT "I could not find this in your documents."
+
+typedef struct lisa_ask_options {
+    size_t                  struct_size;
+    int64_t                 top_k;           /* passages retrieved; default 8, 1..100 */
+    int64_t                 prompt_budget;   /* max prompt tokens; default 1100 */
+    float                   min_similarity;  /* cosine floor for a passage; default 0.40 */
+    int64_t                 max_tokens;      /* answer length limit; default 512 */
+    float                   temperature;     /* default 0 (deterministic) */
+    lisa_token_fn           on_token;        /* optional: answer text as it is generated */
+    void*                   on_token_user;
+    const char*             path_prefix;     /* only documents under this path; NULL: all */
+    const lisa_principal_t* principal;       /* passed to the retrieval filter */
+} lisa_ask_options_t;
+
+#define LISA_ASK_OPTIONS_INIT \
+    { sizeof(lisa_ask_options_t), 8, 1100, 0.40f, 512, 0.0f, NULL, NULL, NULL, NULL }
+
+/* A passage the answer relies on. Strings are owned by the answer. */
+typedef struct lisa_citation {
+    int32_t     number;        /* the [n] used in the answer text */
+    uint64_t    chunk_id;
+    const char* doc_id;
+    const char* source_path;
+    const char* title;         /* document title; "" if none */
+    int64_t     page;          /* 1-based; 0 if unpaged */
+    int64_t     offset;        /* byte offset of the passage in the document text */
+    int64_t     length;
+    const char* quote;         /* the passage text */
+    const char* content_hash;  /* hash of the document when it was ingested */
+    float       similarity;    /* cosine similarity to the question */
+} lisa_citation_t;
+
+/* Allocated by LISA; release with lisa_answer_free. Fields may be added at the end. */
+typedef struct lisa_answer {
+    const char*      text;               /* the full answer */
+    int              found;              /* 0: LISA_NOT_FOUND_TEXT */
+    int              complete;           /* 0: on_token stopped generation early */
+    int64_t          citation_count;
+    lisa_citation_t* citations;          /* in order of first citation */
+    int64_t          passages_retrieved; /* before filtering */
+    int64_t          passages_used;      /* in the prompt */
+    int64_t          prompt_tokens;
+    int64_t          answer_tokens;
+    double           first_token_seconds; /* from the call to the first answer text */
+    double           total_seconds;
+} lisa_answer_t;
+
+/*
+ * Answer the last message of `messages`, which must have role "user".
+ * 1.0 accepts exactly one message (follow-up chat comes later; the list
+ * keeps the API stable). embed_model must be the collection's embedding
+ * model (else LISA_E_MODEL_MISMATCH); chat_model generates. Text streams
+ * to options->on_token as produced (the not-found reply too). options
+ * may be NULL. Release *out with lisa_answer_free.
+ */
+LISA_API int lisa_ask(lisa_collection_t* coll, lisa_model_t* embed_model, lisa_model_t* chat_model,
+                      const lisa_message_t* messages, int64_t count,
+                      const lisa_ask_options_t* options, lisa_answer_t** out);
+
+/* Release an answer. NULL is ignored. */
+LISA_API void lisa_answer_free(lisa_answer_t* answer);
 
 /* ==== Memory returned by LISA ========================================= */
 

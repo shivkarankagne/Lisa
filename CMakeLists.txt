@@ -13,7 +13,7 @@
 #   ctest --test-dir build-asan --output-on-failure
 
 cmake_minimum_required(VERSION 3.20)
-project(lisa VERSION 0.3.0 LANGUAGES C CXX ASM)
+project(lisa VERSION 0.4.0 LANGUAGES C CXX ASM)
 
 option(LISA_SANITIZE         "Build with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
 option(LISA_BUILD_TESTS      "Build tests"      ON)
@@ -146,6 +146,8 @@ add_library(lisa_core STATIC
     src/retrieval/fusion.c
     src/retrieval/index.c
     src/api/lisa_search.c
+    src/api/lisa_ask.c
+    src/context/context.c
     src/storage/storage.c
     src/storage/store.c
     src/kernels/arm64/lisa_asm_wrapper.c
@@ -234,6 +236,24 @@ if(LISA_BUILD_TESTS)
     target_link_libraries(test_query PRIVATE lisa_core lisa_unity)
     add_test(NAME test_query COMMAND test_query ${CMAKE_BINARY_DIR}/scratch ${LISA_MODELS_DIR})
     set_tests_properties(test_query PROPERTIES TIMEOUT 1800)
+
+    add_executable(test_context tests/test_context.c)
+    target_link_libraries(test_context PRIVATE lisa_core lisa_unity)
+    add_test(NAME test_context COMMAND test_context)
+
+    add_executable(test_ask tests/test_ask.c)
+    target_link_libraries(test_ask PRIVATE lisa_core lisa_unity)
+    add_test(NAME test_ask
+             COMMAND test_ask ${CMAKE_BINARY_DIR}/scratch ${CMAKE_SOURCE_DIR}/tests/fixtures ${LISA_MODELS_DIR})
+    set_tests_properties(test_ask PROPERTIES TIMEOUT 1800)
+    if(LISA_SANITIZE)
+        # False positive in llama.cpp, not LISA: after llama_batch_allocr::clear(),
+        # vector<int>::resize(1) value-initialises element 0 with bzero before
+        # Apple libc++ (clang 21) updates its container annotation, and ASan
+        # reports "container-overflow" at byte 0 of the vector's own buffer.
+        # Only this check is off, only here; all other ASan/UBSan checks run.
+        set_tests_properties(test_ask PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_container_overflow=0")
+    endif()
 
     add_executable(test_sqlite tests/test_sqlite.c)
     target_link_libraries(test_sqlite PRIVATE lisa_core lisa_sqlite lisa_unity)
