@@ -1,140 +1,64 @@
-# LISA CLI
+# lisa — command line
 
-Command-line interface for the LISA retrieval engine.
+    lisa ingest  [--data <dir>] --collection <name> <path>...
+    lisa search  [--data <dir>] --collection <name> --query "<text>" [--topk N]
+    lisa ask     [--data <dir>] --collection <name> [--topk N] "<question>"
+    lisa serve   [--data <dir>] [--port <port>] [--token <token>]
+    lisa gui     [--data <dir>]                       (arrives with W10)
+    lisa model   [--data <dir>] [--set <file.gguf>]
+    lisa migrate --from <v1-dir> --to <dir> [--model <id>]
+    lisa --version | --help
 
-## Usage
+`--json` on `ingest`, `search`, `ask`, and `model` prints JSON instead of
+text (the same shapes as the HTTP API, see `docs/http-api.md`).
 
-    lisa --index <file> --dim <int> --query <file> [--topk <int>]
-    lisa --collection <dir> --query <file> [--topk <int>]
+## Data directory
 
-## Flags
+`--data` defaults to `~/Library/Application Support/LISA` on macOS
+(`$XDG_DATA_HOME/lisa` or `~/.local/share/lisa` elsewhere). It is created
+on first use:
 
-| Flag | Required | Default | Meaning |
-| :--- | :--- | :--- | :--- |
-| `--index` | one of index/collection | — | Path to binary vector file |
-| `--collection` | one of index/collection | — | Path to a storage collection directory |
-| `--dim` | required with `--index`; optional with `--collection` | — | Dimension of vectors |
-| `--query` | yes | — | Path to query file |
-| `--topk` | no | 5 | Number of results |
-| `--help` | no | — | Print usage |
+    <data>/config.json          models chosen with `lisa model --set`
+    <data>/collections/<name>/  one collection per name ([A-Za-z0-9_-], 1-64 chars)
+    <data>/models/              model files placed here are found automatically
 
-`--index` and `--collection` are mutually exclusive.
+## Models
 
-## Input formats
+`lisa ask` needs a chat model and an embedding model; `ingest` and
+`search` need the embedding model. They are found in this order:
 
-### Index file (`--index`)
+1. the paths recorded in `config.json` (`lisa model --set <file>`; the
+   file is identified as chat or embedding automatically);
+2. a known model file (`docs/models.md`) in `<data>/models`, in
+   `models/` next to the `lisa` binary, or in `models/` one level up.
 
-Binary, little-endian:
+`lisa model` shows which files are used and verifies them (SHA-256
+against the known models).
 
-- 8 bytes header: `int32 n`, `int32 dim`
-- `n * dim` float32 values, row-major
+## Commands
 
-### Collection directory (`--collection`)
-
-Directory previously created by `storage_create`. Contains:
-
-- `header.bin` — 16 bytes: magic "LISA", version, n, dim
-- `vectors.bin` — `n * dim` float32, row-major
-
-The vector layout is identical to the index file. Searching a collection
-produces the same results as searching an equivalent index file.
-
-### Query file (`--query`)
-
-Text. Floats separated by whitespace or commas. Must contain exactly `dim` values.
-
-## Output
-
-One line per result, ascending by distance:
-
-    <index> <distance>
-
-No header. No decoration. Machine-readable.
+- **ingest** indexes files and folders (txt, md, pdf) into a collection,
+  creating it if needed. Unchanged files are skipped; edited files are
+  replaced; files deleted from an ingested folder are removed. Ctrl-C
+  stops safely after the current document.
+- **search** prints the best matching passages (hybrid keyword + meaning).
+- **ask** streams an answer from the collection with numbered citations,
+  then lists the sources. If the documents do not contain the answer it
+  says "I could not find this in your documents."
+- **serve** runs the local HTTP API (`docs/http-api.md`) on 127.0.0.1
+  and prints a session token. Ctrl-C stops it.
+- **migrate** converts a LISA 0.1 collection (`header.bin` +
+  `vectors.bin`) to the current format; the result supports vector
+  search only (0.1 stored no text).
 
 ## Exit codes
 
 | Code | Meaning |
-| :--- | :--- |
-| 0 | Success |
-| 1 | Invalid arguments |
-| 2 | Index file error |
-| 3 | Query file error |
-| 4 | Dimension mismatch |
-| 5 | Retrieval engine error |
-| 6 | Storage error |
-
-## Examples
-
-### Search a binary index file
-
-    lisa --index vectors_768.bin --dim 768 --topk 5 --query query_768.txt
-
-### Search a storage collection
-
-    lisa --collection /path/to/collection --topk 5 --query query_768.txt
-
-Both produce the same output format:
-
-    6797 108.174782
-    5564 109.033485
-    1245 109.476166
-    8030 110.118279
-    3305 110.140114
-
-## Build
-
-    gcc -O0 -g -o build/lisa \
-        src/cli/main.c \
-        src/retrieval/retrieval_scalar.c \
-        src/kernels/arm64/lisa_asm_wrapper.c \
-        src/kernels/arm64/lisa_ultra_mac.s \
-        src/storage/storage.c \
-        -lm
-
-## Non-goals
-
-This CLI does not:
-
-- serve HTTP
-- run as a daemon
-- create collections
-- insert, update, or delete records
-- provide JSON output
-- provide configuration files
-
-Those are separate work packages.
-
-## Building
-
-From the repository root:
-
-    make
-
-Produces `build/lisa`. See the root `README.md` for the full build
-and test instructions.
-
-The link line is defined only in the root `Makefile`. Do not duplicate
-it here.
-
-## Server mode
-
-    lisa --serve --port <1-65535>
-
-Starts the read-only HTTP API. Blocks until terminated.
-
-Endpoints:
-
-    GET  /health
-         -> 200, body "ok\n"
-
-    POST /search?collection=<path>&topk=<int>
-         Headers: Content-Type: application/octet-stream
-         Body:    dim * float32 LE
-         -> 200, body text, one line per result:
-                <index> <distance>\n
-         -> 400 malformed request
-         -> 404 collection not found
-         -> 500 internal error
-
-The server binds to 127.0.0.1 only. No TLS, no authentication,
-no write endpoints.
+| ---: | :--- |
+| 0 | success |
+| 1 | bad command line |
+| 2 | collection, file, or model not found |
+| 3 | wrong or mismatched model |
+| 4 | collection in use by another writer |
+| 5 | any other error (including `gui` before W10) |
+| 130 | interrupted with Ctrl-C |

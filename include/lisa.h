@@ -53,9 +53,9 @@ extern "C" {
 /* ==== Version ========================================================= */
 
 #define LISA_VERSION_MAJOR 0
-#define LISA_VERSION_MINOR 4
+#define LISA_VERSION_MINOR 5
 #define LISA_VERSION_PATCH 0
-#define LISA_VERSION_STRING "0.4.0"
+#define LISA_VERSION_STRING "0.5.0"
 
 /*
  * Version of the linked library (may differ from the header's macros if
@@ -332,6 +332,17 @@ typedef struct lisa_collection_info {
  */
 LISA_API int lisa_collection_create(lisa_context_t* ctx, const char* path,
                                     const char* embedding_model, int64_t dim);
+
+/*
+ * Convert a LISA 0.1 collection (storage v1 / v1.1: header.bin +
+ * vectors.bin) at v1_path into a new collection at path (must not
+ * exist). Vector i gets chunk ID i; chunks have no text or source (v1
+ * stored none), so the result supports vector search only. v1 recorded
+ * no embedding model: embedding_model names it. v1_path is not modified.
+ * Since 0.5.
+ */
+LISA_API int lisa_collection_migrate_v1(lisa_context_t* ctx, const char* v1_path,
+                                        const char* path, const char* embedding_model);
 
 /*
  * Open a collection. If expected_model is non-NULL and differs from the

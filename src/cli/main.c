@@ -1,289 +1,545 @@
+/* SPDX-License-Identifier: BUSL-1.1 */
+/*
+ * lisa — command-line interface (plan §6 W9). See src/cli/README.md.
+ *
+ * Uses LISA through include/lisa.h, the program layer in src/app, the
+ * HTTP server in src/http, and OS services through src/platform.
+ */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdint.h>
 
-#include "../retrieval/retrieval.h"
-#include "../storage/storage.h"
-#include "../api/http.h"
+#include "lisa.h"
+#include "yyjson.h"
+#include "../app/app.h"
+#include "../app/app_json.h"
+#include "../http/server.h"
+#include "../platform/platform.h"
 
-/*
- * LISA CLI
- *
- * Usage:
- *   lisa --index <file> --dim <int> --query <file> [--topk <int>]
- *   lisa --collection <dir>        --query <file> [--topk <int>]
- *
- * Inputs:
- *   --index <file>       Binary. Header: int32 n, int32 dim (LE).
- *                        Body:   n * dim float32 LE, row-major.
- *   --collection <dir>   Directory previously created by storage_create.
- *   --query <file>       Text. Floats separated by whitespace or commas.
- *
- * Output:
- *   One line per result, ascending by distance:
- *       <index> <distance>
- *
- * Exit codes:
- *   0  success
- *   1  invalid arguments
- *   2  index file error
- *   3  query file error
- *   4  dimension mismatch
- *   5  retrieval engine error
- *   6  storage error
- */
+/* Exit codes (stable; documented in README.md). */
+#define EXIT_OK        0
+#define EXIT_USAGE     1   /* bad command line */
+#define EXIT_NOT_FOUND 2   /* collection, file, or model not found */
+#define EXIT_MODEL     3   /* wrong or mismatched model */
+#define EXIT_BUSY      4   /* collection in use by another writer */
+#define EXIT_ERROR     5   /* anything else */
+#define EXIT_STOPPED   130 /* interrupted (Ctrl-C) */
 
-static void usage(const char* prog) {
-    fprintf(stderr,
-        "usage: %s --index <file> --dim <int> --query <file> [--topk <int>]\n"
-        "       %s --collection <dir> --query <file> [--topk <int>]\n"
-        "       %s --serve --port <int>\n",
-        prog, prog, prog);
+static const char k_usage[] =
+    "usage:\n"
+    "  lisa ingest  [--data <dir>] --collection <name> <path>...   index files and folders\n"
+    "  lisa search  [--data <dir>] --collection <name> --query \"<text>\" [--topk N]\n"
+    "  lisa ask     [--data <dir>] --collection <name> [--topk N] \"<question>\"\n"
+    "  lisa serve   [--data <dir>] [--port <port>]                  local HTTP API\n"
+    "  lisa gui     [--data <dir>]\n"
+    "  lisa model   [--data <dir>] [--set <file.gguf>]              show or set models\n"
+    "  lisa migrate --from <v1-dir> --to <dir> [--model <id>]       convert a LISA 0.1 collection\n"
+    "  lisa --version\n"
+    "\n"
+    "Add --json to ingest, search, ask, or model for machine-readable output.\n"
+    "Default data directory: ~/Library/Application Support/LISA (macOS).\n";
+
+static int exit_for(int rc) {
+    switch (rc) {
+    case LISA_OK:                 return EXIT_OK;
+    case LISA_E_INVALID_ARGUMENT: return EXIT_USAGE;
+    case LISA_E_NOT_FOUND:        return EXIT_NOT_FOUND;
+    case LISA_E_MODEL_MISMATCH:
+    case LISA_E_WRONG_MODEL_KIND: return EXIT_MODEL;
+    case LISA_E_BUSY:             return EXIT_BUSY;
+    case LISA_E_CANCELLED:        return EXIT_STOPPED;
+    default:                      return EXIT_ERROR;
+    }
 }
 
-static int load_index(const char* path, float** out_vectors, int* out_n, int* out_dim) {
-    FILE* f = fopen(path, "rb");
-    if (!f) {
-        fprintf(stderr, "error: cannot open index file: %s\n", path);
-        return -1;
-    }
-
-    int32_t header[2];
-    if (fread(header, sizeof(int32_t), 2, f) != 2) {
-        fprintf(stderr, "error: index file too small for header: %s\n", path);
-        fclose(f);
-        return -1;
-    }
-
-    int n = (int)header[0];
-    int dim = (int)header[1];
-    if (n <= 0 || dim <= 0) {
-        fprintf(stderr, "error: invalid index header: n=%d dim=%d\n", n, dim);
-        fclose(f);
-        return -1;
-    }
-
-    size_t count = (size_t)n * (size_t)dim;
-    float* vectors = (float*)malloc(count * sizeof(float));
-    if (!vectors) {
-        fprintf(stderr, "error: cannot allocate %zu floats\n", count);
-        fclose(f);
-        return -1;
-    }
-
-    if (fread(vectors, sizeof(float), count, f) != count) {
-        fprintf(stderr, "error: index file body is truncated\n");
-        free(vectors);
-        fclose(f);
-        return -1;
-    }
-
-    fclose(f);
-    *out_vectors = vectors;
-    *out_n = n;
-    *out_dim = dim;
-    return 0;
+static int fail(int rc, const char* what, const char* detail) {
+    fprintf(stderr, "lisa: %s: %s\n", what, detail && detail[0] ? detail : lisa_status_string(rc));
+    return exit_for(rc);
 }
 
-static int load_query(const char* path, int dim, float** out_query) {
-    FILE* f = fopen(path, "r");
-    if (!f) {
-        fprintf(stderr, "error: cannot open query file: %s\n", path);
-        return -1;
-    }
+/* ---- arguments ---------------------------------------------------------- */
 
-    float* query = (float*)malloc((size_t)dim * sizeof(float));
-    if (!query) {
-        fprintf(stderr, "error: cannot allocate query\n");
-        fclose(f);
-        return -1;
-    }
+typedef struct {
+    const char* data;
+    const char* collection;
+    const char* query;
+    const char* from;
+    const char* to;
+    const char* model;
+    const char* set;
+    const char* token;
+    int64_t     topk;
+    int         port;
+    int         json;
+    const char* pos[256];
+    int         n_pos;
+} args_t;
 
-    int count = 0;
-    float val;
-    while (count < dim && fscanf(f, " %f", &val) == 1) {
-        query[count++] = val;
-        int c = fgetc(f);
-        if (c == ',') {
+static int parse_int(const char* s, int64_t lo, int64_t hi, int64_t* out) {
+    char* end = NULL;
+    long long v = strtoll(s, &end, 10);
+    if (end == s || *end != '\0' || v < lo || v > hi) return 0;
+    *out = v;
+    return 1;
+}
+
+/* Returns 0 on success, or prints the problem and returns EXIT_USAGE. */
+static int parse_args(int argc, char** argv, args_t* a) {
+    memset(a, 0, sizeof(*a));
+    a->topk = -1;
+    a->port = SERVER_DEFAULT_PORT;
+    for (int i = 0; i < argc; i++) {
+        const char* s = argv[i];
+        const char** slot = NULL;
+        if (strcmp(s, "--json") == 0) { a->json = 1; continue; }
+        if (strcmp(s, "--data") == 0) slot = &a->data;
+        else if (strcmp(s, "--collection") == 0) slot = &a->collection;
+        else if (strcmp(s, "--query") == 0) slot = &a->query;
+        else if (strcmp(s, "--from") == 0) slot = &a->from;
+        else if (strcmp(s, "--to") == 0) slot = &a->to;
+        else if (strcmp(s, "--model") == 0) slot = &a->model;
+        else if (strcmp(s, "--set") == 0) slot = &a->set;
+        else if (strcmp(s, "--token") == 0) slot = &a->token;
+        else if (strcmp(s, "--topk") == 0 || strcmp(s, "--port") == 0) {
+            int64_t v;
+            int is_port = s[2] == 'p';
+            if (i + 1 >= argc || !parse_int(argv[i + 1], is_port ? 0 : 1, is_port ? 65535 : 100, &v)) {
+                fprintf(stderr, "lisa: %s needs a number (%s)\n", s, is_port ? "0-65535" : "1-100");
+                return EXIT_USAGE;
+            }
+            if (is_port) a->port = (int)v;
+            else a->topk = v;
+            i++;
+            continue;
+        } else if (s[0] == '-' && s[1] == '-') {
+            fprintf(stderr, "lisa: unknown option %s\n%s", s, k_usage);
+            return EXIT_USAGE;
+        } else {
+            if (a->n_pos < 256) a->pos[a->n_pos++] = s;
             continue;
         }
-        if (c != EOF) {
-            ungetc(c, f);
+        if (i + 1 >= argc) {
+            fprintf(stderr, "lisa: %s needs a value\n", s);
+            return EXIT_USAGE;
         }
+        *slot = argv[++i];
     }
-
-    fclose(f);
-
-    if (count != dim) {
-        fprintf(stderr, "error: query has %d values, expected %d\n", count, dim);
-        free(query);
-        return -1;
-    }
-
-    *out_query = query;
     return 0;
 }
 
-int main(int argc, char** argv) {
-    const char* index_path = NULL;
-    const char* collection_path = NULL;
-    const char* query_path = NULL;
-    int dim_arg = 0;
-    int topk = 5;
-    int serve = 0;
-    int port = 0;
-
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--index") == 0 && i + 1 < argc) {
-            index_path = argv[++i];
-        } else if (strcmp(argv[i], "--collection") == 0 && i + 1 < argc) {
-            collection_path = argv[++i];
-        } else if (strcmp(argv[i], "--query") == 0 && i + 1 < argc) {
-            query_path = argv[++i];
-        } else if (strcmp(argv[i], "--dim") == 0 && i + 1 < argc) {
-            dim_arg = atoi(argv[++i]);
-        } else if (strcmp(argv[i], "--topk") == 0 && i + 1 < argc) {
-            topk = atoi(argv[++i]);
-        } else if (strcmp(argv[i], "--serve") == 0) {
-            serve = 1;
-        } else if (strcmp(argv[i], "--port") == 0 && i + 1 < argc) {
-            port = atoi(argv[++i]);
-        } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
-            usage(argv[0]);
-            return 0;
-        } else {
-            fprintf(stderr, "error: unknown argument: %s\n", argv[i]);
-            usage(argv[0]);
-            return 1;
-        }
+static int need_collection(const args_t* a) {
+    if (a->collection == NULL) {
+        fprintf(stderr, "lisa: --collection <name> is required\n");
+        return EXIT_USAGE;
     }
-
-    if (serve) {
-        if (port <= 0 || port > 65535) {
-            fprintf(stderr, "error: --serve requires --port <1-65535>\n");
-            usage(argv[0]);
-            return 1;
-        }
-        int rc = lisa_http_serve(port);
-        if (rc != 0) {
-            fprintf(stderr, "error: lisa_http_serve failed: %d\n", rc);
-            return 5;
-        }
-        return 0;
+    if (!app_valid_name(a->collection)) {
+        fprintf(stderr, "lisa: collection names are 1-64 characters of A-Z a-z 0-9 _ -\n");
+        return EXIT_USAGE;
     }
-
-    if (index_path && collection_path) {
-        fprintf(stderr, "error: --index and --collection are mutually exclusive\n");
-        usage(argv[0]);
-        return 1;
-    }
-
-    if (!query_path || topk <= 0) {
-        usage(argv[0]);
-        return 1;
-    }
-
-    if (!index_path && !collection_path) {
-        usage(argv[0]);
-        return 1;
-    }
-
-    float* vectors = NULL;
-    int n = 0;
-    int dim = 0;
-
-    int storage_handle = 0;
-    int owns_vectors = 0;
-
-    if (index_path) {
-        if (dim_arg <= 0) {
-            usage(argv[0]);
-            return 1;
-        }
-        if (load_index(index_path, &vectors, &n, &dim) != 0) {
-            return 2;
-        }
-        owns_vectors = 1;
-
-        if (dim != dim_arg) {
-            fprintf(stderr, "error: index dim=%d, --dim=%d\n", dim, dim_arg);
-            free(vectors);
-            return 4;
-        }
-    } else {
-        storage_handle = storage_open(collection_path);
-        if (storage_handle < 0) {
-            fprintf(stderr, "error: storage_open failed: %d\n", storage_handle);
-            return 6;
-        }
-
-        int sn = storage_get_n(storage_handle);
-        int sdim = storage_get_dim(storage_handle);
-        const float* svec = storage_get_vectors(storage_handle);
-        if (sn <= 0 || sdim <= 0 || svec == NULL) {
-            fprintf(stderr, "error: storage metadata invalid\n");
-            storage_close(storage_handle);
-            return 6;
-        }
-
-        if (dim_arg > 0 && dim_arg != sdim) {
-            fprintf(stderr, "error: collection dim=%d, --dim=%d\n", sdim, dim_arg);
-            storage_close(storage_handle);
-            return 4;
-        }
-
-        n = sn;
-        dim = sdim;
-        vectors = (float*)svec;
-        owns_vectors = 0;
-    }
-
-    float* query = NULL;
-    if (load_query(query_path, dim, &query) != 0) {
-        if (owns_vectors) free(vectors);
-        if (storage_handle > 0) storage_close(storage_handle);
-        return 3;
-    }
-
-    int k_eff = (topk < n) ? topk : n;
-
-    int* indices = (int*)malloc((size_t)k_eff * sizeof(int));
-    float* dists = (float*)malloc((size_t)k_eff * sizeof(float));
-    if (!indices || !dists) {
-        fprintf(stderr, "error: cannot allocate result arrays\n");
-        if (owns_vectors) free(vectors);
-        free(query);
-        free(indices); free(dists);
-        if (storage_handle > 0) storage_close(storage_handle);
-        return 5;
-    }
-
-    lisa_result_t result = {
-        .indices = indices,
-        .dists = dists,
-        .k = k_eff,
-        .n_returned = 0
-    };
-
-    int rc = lisa_search(query, vectors, n, dim, k_eff, &result);
-    if (rc != 0) {
-        fprintf(stderr, "error: retrieval engine returned %d\n", rc);
-        if (owns_vectors) free(vectors);
-        free(query);
-        free(indices); free(dists);
-        if (storage_handle > 0) storage_close(storage_handle);
-        return 5;
-    }
-
-    for (int i = 0; i < result.n_returned; i++) {
-        printf("%d %.6f\n", result.indices[i], result.dists[i]);
-    }
-
-    if (owns_vectors) free(vectors);
-    free(query);
-    free(indices);
-    free(dists);
-    if (storage_handle > 0) storage_close(storage_handle);
     return 0;
+}
+
+static void print_json(yyjson_mut_doc* doc) {
+    char* s = yyjson_mut_write(doc, YYJSON_WRITE_PRETTY, NULL);
+    if (s) printf("%s\n", s);
+    free(s);
+    yyjson_mut_doc_free(doc);
+}
+
+/* ---- ingest ------------------------------------------------------------- */
+
+static int cmd_ingest(app_t* app, const args_t* a) {
+    int bad = need_collection(a);
+    if (bad) return bad;
+    if (a->n_pos == 0) {
+        fprintf(stderr, "lisa: give at least one file or folder to ingest\n");
+        return EXIT_USAGE;
+    }
+    char* abs[256];
+    int n = 0;
+    for (int i = 0; i < a->n_pos; i++) {
+        abs[n] = lisa_path_absolute(a->pos[i]);
+        if (abs[n] == NULL) {
+            for (int k = 0; k < n; k++) free(abs[k]);
+            fprintf(stderr, "lisa: no such file or folder: %s\n", a->pos[i]);
+            return EXIT_NOT_FOUND;
+        }
+        n++;
+    }
+
+    const char* err = NULL;
+    lisa_model_t* embed = NULL;
+    char* path = app_collection_path(app, a->collection);
+    lisa_collection_t* c = NULL;
+    lisa_ingest_job_t* job = NULL;
+    int rc = app_load_model(app, APP_MODEL_EMBEDDING, &embed, &err);
+    int created = 0;
+    if (rc == LISA_OK && !lisa_path_exists(path)) {
+        rc = lisa_collection_create_for_model(app->ctx, path, embed, 0);
+        created = rc == LISA_OK;
+        err = rc == LISA_OK ? NULL : "cannot create the collection";
+    }
+    if (rc == LISA_OK) {
+        rc = lisa_collection_open(app->ctx, path, LISA_OPEN_WRITE, NULL, &c);
+        if (rc == LISA_E_BUSY) err = "the collection is being written by another process";
+        else if (rc != LISA_OK) err = "cannot open the collection";
+    }
+    if (rc == LISA_OK) {
+        rc = lisa_ingest_start(c, embed, (const char* const*)abs, n, NULL, &job);
+        if (rc == LISA_E_MODEL_MISMATCH) err = "the collection was built with a different embedding model";
+    }
+
+    lisa_ingest_status_t st = LISA_INGEST_STATUS_INIT;
+    if (rc == LISA_OK) {
+        if (!a->json) fprintf(stderr, "Indexing into '%s'%s... (Ctrl-C stops safely)\n", a->collection,
+                              created ? " (new collection)" : "");
+        lisa_stop_signals_install();
+        int64_t last_seen = -1;
+        for (;;) {
+            lisa_ingest_status(job, &st);
+            if (st.state != LISA_JOB_RUNNING) break;
+            if (lisa_stop_requested()) lisa_ingest_cancel(job);
+            if (!a->json && st.files_seen != last_seen && st.files_seen % 10 == 0 && st.files_seen > 0) {
+                fprintf(stderr, "  %lld files, %lld chunks so far\n", (long long)st.files_seen,
+                        (long long)st.chunks_added);
+                last_seen = st.files_seen;
+            }
+            lisa_sleep_ms(100);
+        }
+        rc = lisa_ingest_wait(job, &st);
+        lisa_ingest_free(job);
+        if (st.state == LISA_JOB_CANCELLED) rc = LISA_E_CANCELLED;
+    }
+
+    if (a->json && (rc == LISA_OK || rc == LISA_E_CANCELLED)) {
+        yyjson_mut_doc* doc = yyjson_mut_doc_new(NULL);
+        yyjson_mut_val* root = yyjson_mut_obj(doc);
+        yyjson_mut_doc_set_root(doc, root);
+        yyjson_mut_obj_add_str(doc, root, "collection", a->collection);
+        yyjson_mut_obj_add_bool(doc, root, "cancelled", rc == LISA_E_CANCELLED);
+        app_json_ingest_status(doc, root, &st);
+        print_json(doc);
+    } else if (rc == LISA_OK || rc == LISA_E_CANCELLED) {
+        printf("%s '%s': %lld added, %lld updated, %lld unchanged, %lld removed, %lld without text, "
+               "%lld failed, %lld unsupported skipped; %lld chunks added in %.1f s\n",
+               rc == LISA_OK ? "Indexed" : "Stopped indexing", a->collection,
+               (long long)st.files_added, (long long)st.files_updated, (long long)st.files_unchanged,
+               (long long)st.files_removed, (long long)st.files_no_text, (long long)st.files_failed,
+               (long long)st.files_skipped, (long long)st.chunks_added, st.elapsed_seconds);
+        if (st.files_failed > 0 || st.files_no_text > 0)
+            printf("See which files: lisa does not index scanned PDFs (no text layer) or unreadable files.\n");
+    }
+    lisa_collection_close(c);
+    lisa_model_free(embed);
+    free(path);
+    for (int k = 0; k < n; k++) free(abs[k]);
+    if (rc == LISA_E_CANCELLED) return EXIT_STOPPED;
+    return rc == LISA_OK ? EXIT_OK : fail(rc, "ingest", err);
+}
+
+/* ---- search and ask ------------------------------------------------------ */
+
+/* Open the named collection read-only and load the models needed. */
+static int open_for_query(app_t* app, const args_t* a, int need_chat, lisa_collection_t** c,
+                          lisa_model_t** embed, lisa_model_t** chat, const char** err) {
+    *c = NULL;
+    *embed = *chat = NULL;
+    char* path = app_collection_path(app, a->collection);
+    int rc = lisa_path_is_dir(path) ? LISA_OK : LISA_E_NOT_FOUND;
+    if (rc != LISA_OK) *err = "no such collection (create it with `lisa ingest`)";
+    if (rc == LISA_OK) {
+        rc = lisa_collection_open(app->ctx, path, LISA_OPEN_READ, NULL, c);
+        if (rc != LISA_OK) *err = "cannot open the collection";
+    }
+    free(path);
+    if (rc == LISA_OK) rc = app_load_model(app, APP_MODEL_EMBEDDING, embed, err);
+    if (rc == LISA_OK && need_chat) rc = app_load_model(app, APP_MODEL_CHAT, chat, err);
+    return rc;
+}
+
+static void close_query(lisa_collection_t* c, lisa_model_t* embed, lisa_model_t* chat) {
+    lisa_collection_close(c);
+    lisa_model_free(chat);   /* llama.cpp aborts at exit if a model is still loaded */
+    lisa_model_free(embed);
+}
+
+static void print_snippet(const char* text, size_t max) {
+    size_t n = 0;
+    printf("   ");
+    for (const char* p = text; *p && n < max; p++, n++) putchar(*p == '\n' ? ' ' : *p);
+    if (strlen(text) > max) {
+        /* Do not cut a UTF-8 sequence in half. */
+        const char* p = text + max;
+        while (((unsigned char)*p & 0xC0) == 0x80) putchar(*p++);
+        printf("...");
+    }
+    printf("\n");
+}
+
+static int cmd_search(app_t* app, const args_t* a) {
+    int bad = need_collection(a);
+    if (bad) return bad;
+    const char* q = a->query ? a->query : (a->n_pos == 1 ? a->pos[0] : NULL);
+    if (q == NULL || q[0] == '\0') {
+        fprintf(stderr, "lisa: --query \"<text>\" is required\n");
+        return EXIT_USAGE;
+    }
+    lisa_collection_t* c;
+    lisa_model_t *embed, *chat;
+    const char* err = NULL;
+    int rc = open_for_query(app, a, 0, &c, &embed, &chat, &err);
+    lisa_query_t opt = LISA_QUERY_INIT;
+    if (a->topk > 0) opt.top_k = a->topk;
+    lisa_scored_hit_t hits[100];
+    int64_t n = 0;
+    if (rc == LISA_OK) {
+        rc = lisa_collection_query_text(c, embed, q, &opt, hits, opt.top_k, &n);
+        if (rc == LISA_E_MODEL_MISMATCH) err = "the collection was built with a different embedding model";
+    }
+    yyjson_mut_doc* doc = NULL;
+    yyjson_mut_val* arr = NULL;
+    if (rc == LISA_OK && a->json) {
+        doc = yyjson_mut_doc_new(NULL);
+        yyjson_mut_val* root = yyjson_mut_obj(doc);
+        yyjson_mut_doc_set_root(doc, root);
+        arr = yyjson_mut_obj_add_arr(doc, root, "hits");
+    }
+    if (rc == LISA_OK && !a->json && n == 0) printf("No matches.\n");
+    for (int64_t i = 0; rc == LISA_OK && i < n; i++) {
+        lisa_chunk_t* ch = NULL;
+        if (lisa_collection_get_chunk(c, hits[i].id, &ch) != LISA_OK) continue;
+        if (doc) {
+            yyjson_mut_val* o = yyjson_mut_arr_add_obj(doc, arr);
+            yyjson_mut_obj_add_uint(doc, o, "id", hits[i].id);
+            yyjson_mut_obj_add_real(doc, o, "score", hits[i].score);
+            yyjson_mut_obj_add_strcpy(doc, o, "path", ch->source_path);
+            yyjson_mut_obj_add_int(doc, o, "page", ch->page);
+            yyjson_mut_obj_add_int(doc, o, "offset", ch->offset);
+            yyjson_mut_obj_add_int(doc, o, "length", ch->length);
+            yyjson_mut_obj_add_strcpy(doc, o, "text", ch->text);
+        } else {
+            if (ch->page > 0) printf("%lld. %s (page %lld)\n", (long long)(i + 1), ch->source_path, (long long)ch->page);
+            else printf("%lld. %s\n", (long long)(i + 1), ch->source_path);
+            print_snippet(ch->text, 200);
+        }
+        lisa_chunk_free(ch);
+    }
+    if (doc) print_json(doc);
+    close_query(c, embed, chat);
+    return rc == LISA_OK ? EXIT_OK : fail(rc, "search", err);
+}
+
+static int print_piece(void* user, const char* text, int64_t len) {
+    (void)user;
+    fwrite(text, 1, (size_t)len, stdout);
+    fflush(stdout);
+    return lisa_stop_requested();
+}
+
+static int cmd_ask(app_t* app, const args_t* a) {
+    int bad = need_collection(a);
+    if (bad) return bad;
+    if (a->n_pos != 1 || a->pos[0][0] == '\0') {
+        fprintf(stderr, "lisa: give one question, in quotes\n");
+        return EXIT_USAGE;
+    }
+    lisa_collection_t* c;
+    lisa_model_t *embed, *chat;
+    const char* err = NULL;
+    int rc = open_for_query(app, a, 1, &c, &embed, &chat, &err);
+    lisa_ask_options_t o = LISA_ASK_OPTIONS_INIT;
+    if (a->topk > 0) o.top_k = a->topk;
+    if (!a->json) {
+        o.on_token = print_piece;
+        lisa_stop_signals_install();
+    }
+    lisa_answer_t* ans = NULL;
+    if (rc == LISA_OK) {
+        lisa_message_t m = { "user", a->pos[0] };
+        rc = lisa_ask(c, embed, chat, &m, 1, &o, &ans);
+        if (rc == LISA_E_MODEL_MISMATCH) err = "the collection was built with a different embedding model";
+    }
+    if (rc == LISA_OK && a->json) {
+        yyjson_mut_doc* doc = yyjson_mut_doc_new(NULL);
+        yyjson_mut_val* root = yyjson_mut_obj(doc);
+        yyjson_mut_doc_set_root(doc, root);
+        app_json_answer(doc, root, ans);
+        print_json(doc);
+    } else if (rc == LISA_OK) {
+        printf("\n");
+        if (ans->citation_count > 0) printf("\nSources:\n");
+        for (int64_t i = 0; i < ans->citation_count; i++) {
+            const lisa_citation_t* ci = &ans->citations[i];
+            printf("  [%d] %s", ci->number, ci->source_path);
+            if (ci->page > 0) printf(", page %lld", (long long)ci->page);
+            printf("\n");
+        }
+        if (!ans->complete) printf("(stopped)\n");
+    }
+    int stopped = rc == LISA_OK && !ans->complete;
+    lisa_answer_free(ans);
+    close_query(c, embed, chat);
+    if (stopped) return EXIT_STOPPED;
+    return rc == LISA_OK ? EXIT_OK : fail(rc, "ask", err);
+}
+
+/* ---- serve / gui ----------------------------------------------------------- */
+
+static int cmd_serve(app_t* app, const args_t* a) {
+    const char* err = NULL;
+    lisa_model_t *embed = NULL, *chat = NULL;
+    if (app_load_model(app, APP_MODEL_EMBEDDING, &embed, &err) != LISA_OK)
+        fprintf(stderr, "lisa: warning: %s; search and ask are unavailable\n", err);
+    if (app_load_model(app, APP_MODEL_CHAT, &chat, &err) != LISA_OK)
+        fprintf(stderr, "lisa: warning: %s; ask is unavailable\n", err);
+
+    server_options_t so = { app, a->port, chat, embed, a->token };
+    lisa_server_t* srv = NULL;
+    lisa_stop_signals_install();
+    int rc = server_start(&so, &srv, &err);
+    if (rc == LISA_OK) {
+        printf("LISA %s serving http://127.0.0.1:%d/v1 (local only)\n", lisa_version(NULL, NULL, NULL),
+               server_port(srv));
+        printf("Session token: %s\n", server_token(srv));
+        printf("Send it as 'Authorization: Bearer <token>'. Ctrl-C stops the server.\n");
+        fflush(stdout);
+        while (!lisa_stop_requested()) lisa_sleep_ms(200);
+        printf("Stopping...\n");
+        server_stop(srv);
+    }
+    lisa_model_free(chat);
+    lisa_model_free(embed);
+    return rc == LISA_OK ? EXIT_OK : fail(rc, "serve", err);
+}
+
+/* ---- model ----------------------------------------------------------------- */
+
+static int cmd_model(app_t* app, const args_t* a) {
+    if (a->set) {
+        lisa_known_model_t km;
+        int vr = lisa_model_verify(a->set, &km, NULL);
+        if (vr == LISA_E_NOT_FOUND) return fail(vr, "model", "no such file");
+        int is_embedding;
+        if (vr == LISA_OK) {
+            is_embedding = km.is_embedding != 0;
+        } else {
+            /* Not a known file: load it to learn what it is. */
+            lisa_model_t* m = NULL;
+            int rc = lisa_model_load(app->ctx, a->set, NULL, &m);
+            if (rc != LISA_OK) return fail(rc, "model", "not a usable GGUF model");
+            lisa_model_info_t info = LISA_MODEL_INFO_INIT;
+            lisa_model_info(m, &info);
+            is_embedding = info.is_embedding != 0;
+            lisa_model_free(m);
+            fprintf(stderr, "lisa: warning: not a known model file (unverified); it loads\n");
+        }
+        app_model_kind kind = is_embedding ? APP_MODEL_EMBEDDING : APP_MODEL_CHAT;
+        int rc = app_set_model(app, kind, a->set);
+        if (rc != LISA_OK) return fail(rc, "model", "cannot write config.json");
+        printf("Set %s model: %s\n", is_embedding ? "embedding" : "chat", app->config_model[kind]);
+        return EXIT_OK;
+    }
+
+    yyjson_mut_doc* doc = a->json ? yyjson_mut_doc_new(NULL) : NULL;
+    yyjson_mut_val* root = NULL;
+    if (doc) {
+        root = yyjson_mut_obj(doc);
+        yyjson_mut_doc_set_root(doc, root);
+    }
+    int missing = 0;
+    static const char* const label[2] = { "chat", "embedding" };
+    for (int k = 0; k < 2; k++) {
+        const char* source = NULL;
+        char* path = app_find_model(app, (app_model_kind)k, &source);
+        lisa_known_model_t km;
+        char sha[65] = "";
+        int vr = path ? lisa_model_verify(path, &km, sha) : LISA_E_NOT_FOUND;
+        const char* status = vr == LISA_OK ? "verified" : vr == LISA_E_UNSUPPORTED ? "unverified (not a known file)"
+                                                                                   : "missing";
+        if (vr == LISA_E_NOT_FOUND) missing = 1;
+        if (doc) {
+            yyjson_mut_val* o = yyjson_mut_obj_add_obj(doc, root, label[k]);
+            if (path) yyjson_mut_obj_add_strcpy(doc, o, "path", path);
+            if (source) yyjson_mut_obj_add_str(doc, o, "source", source);
+            yyjson_mut_obj_add_str(doc, o, "status", vr == LISA_OK ? "verified"
+                                                     : vr == LISA_E_UNSUPPORTED ? "unverified" : "missing");
+            if (vr == LISA_OK) {
+                yyjson_mut_obj_add_strcpy(doc, o, "id", km.id);
+                yyjson_mut_obj_add_strcpy(doc, o, "license", km.license);
+            }
+            if (sha[0]) yyjson_mut_obj_add_strcpy(doc, o, "sha256", sha);
+        } else {
+            printf("%-9s  %s\n", label[k], path ? path : "(none found)");
+            if (path) {
+                printf("           %s", status);
+                if (vr == LISA_OK) printf(": %s, %s", km.id, km.license);
+                printf("%s\n", source && strcmp(source, "config") == 0 ? "  [from config.json]" : "");
+            }
+        }
+        free(path);
+    }
+    if (doc) print_json(doc);
+    else if (missing) printf("\nSet a model with: lisa model --set <file.gguf>  (see docs/models.md)\n");
+    return missing ? EXIT_NOT_FOUND : EXIT_OK;
+}
+
+/* ---- migrate ---------------------------------------------------------------- */
+
+static int cmd_migrate(app_t* app, const args_t* a) {
+    if (a->from == NULL || a->to == NULL) {
+        fprintf(stderr, "lisa: migrate needs --from <v1-dir> --to <dir>\n");
+        return EXIT_USAGE;
+    }
+    const char* model = a->model ? a->model : "unknown-v1";
+    int rc = lisa_collection_migrate_v1(app->ctx, a->from, a->to, model);
+    if (rc != LISA_OK) {
+        return fail(rc, "migrate", rc == LISA_E_EXISTS ? "the destination already exists"
+                                 : rc == LISA_E_NOT_FOUND ? "no v1 collection at --from" : NULL);
+    }
+    printf("Migrated %s -> %s (embedding model recorded as '%s'; vector search only)\n", a->from, a->to, model);
+    return EXIT_OK;
+}
+
+/* ---- main ------------------------------------------------------------------- */
+
+int main(int argc, char** argv) {
+    if (argc < 2) {
+        fprintf(stderr, "%s", k_usage);
+        return EXIT_USAGE;
+    }
+    const char* cmd = argv[1];
+    if (strcmp(cmd, "--version") == 0 || strcmp(cmd, "-V") == 0 || strcmp(cmd, "version") == 0) {
+        printf("lisa %s\n", lisa_version(NULL, NULL, NULL));
+        return EXIT_OK;
+    }
+    if (strcmp(cmd, "--help") == 0 || strcmp(cmd, "-h") == 0 || strcmp(cmd, "help") == 0) {
+        printf("%s", k_usage);
+        return EXIT_OK;
+    }
+    int (*fn)(app_t*, const args_t*) = NULL;
+    if (strcmp(cmd, "ingest") == 0) fn = cmd_ingest;
+    else if (strcmp(cmd, "search") == 0) fn = cmd_search;
+    else if (strcmp(cmd, "ask") == 0) fn = cmd_ask;
+    else if (strcmp(cmd, "serve") == 0) fn = cmd_serve;
+    else if (strcmp(cmd, "model") == 0) fn = cmd_model;
+    else if (strcmp(cmd, "migrate") == 0) fn = cmd_migrate;
+    else if (strcmp(cmd, "gui") == 0) {
+        fprintf(stderr, "lisa: the GUI arrives in the next release (W10); use `lisa serve` for now\n");
+        return EXIT_ERROR;
+    } else {
+        fprintf(stderr, "lisa: unknown command '%s'\n%s", cmd, k_usage);
+        return EXIT_USAGE;
+    }
+
+    args_t a;
+    int bad = parse_args(argc - 2, argv + 2, &a);
+    if (bad) return bad;
+    app_t app;
+    const char* err = NULL;
+    int rc = app_open(&app, a.data, &err);
+    if (rc != LISA_OK) return fail(rc, "data directory", err);
+    int code = fn(&app, &a);
+    app_close(&app);
+    return code;
 }

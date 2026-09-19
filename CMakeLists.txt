@@ -13,7 +13,7 @@
 #   ctest --test-dir build-asan --output-on-failure
 
 cmake_minimum_required(VERSION 3.20)
-project(lisa VERSION 0.4.0 LANGUAGES C CXX ASM)
+project(lisa VERSION 0.5.0 LANGUAGES C CXX ASM)
 
 option(LISA_SANITIZE         "Build with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
 option(LISA_BUILD_TESTS      "Build tests"      ON)
@@ -176,11 +176,17 @@ endif()
 
 # ---- executable --------------------------------------------------------
 
-add_executable(lisa
-    src/cli/main.c
-    src/api/http.c
+# The program layer (data dir, config, models) and the HTTP server; used by
+# the CLI and by tests.
+add_library(lisa_app STATIC
+    src/app/app.c
+    src/app/app_json.c
+    src/http/server.c
 )
-target_link_libraries(lisa PRIVATE lisa_core)
+target_link_libraries(lisa_app PUBLIC lisa_core lisa_yyjson lisa_civetweb)
+
+add_executable(lisa src/cli/main.c)
+target_link_libraries(lisa PRIVATE lisa_app)
 
 # ---- tests -------------------------------------------------------------
 
@@ -268,6 +274,16 @@ if(LISA_BUILD_TESTS)
         set_tests_properties(test_ask PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_container_overflow=0")
     endif()
 
+    add_executable(test_http tests/test_http.c)
+    target_link_libraries(test_http PRIVATE lisa_app lisa_unity)
+    add_test(NAME test_http
+             COMMAND test_http ${CMAKE_BINARY_DIR}/scratch ${CMAKE_SOURCE_DIR}/tests/fixtures ${LISA_MODELS_DIR})
+    set_tests_properties(test_http PROPERTIES TIMEOUT 1800)
+    if(LISA_SANITIZE)
+        # Same llama.cpp false positive as test_ask (see there).
+        set_tests_properties(test_http PROPERTIES ENVIRONMENT "ASAN_OPTIONS=detect_container_overflow=0")
+    endif()
+
     add_executable(test_sqlite tests/test_sqlite.c)
     target_link_libraries(test_sqlite PRIVATE lisa_core lisa_sqlite lisa_unity)
     add_test(NAME test_sqlite COMMAND test_sqlite ${CMAKE_BINARY_DIR}/scratch)
@@ -306,14 +322,14 @@ if(LISA_BUILD_TESTS)
     add_test(NAME test_cli COMMAND bash ${CMAKE_SOURCE_DIR}/tests/test_cli.sh)
     set_tests_properties(test_cli PROPERTIES
         FIXTURES_REQUIRED testdata
-        FAIL_REGULAR_EXPRESSION "SKIP"
+        TIMEOUT 1800
         ENVIRONMENT
-            "LISA_BIN=$<TARGET_FILE:lisa>;LISA_TEST_INDEX=${LISA_TESTDATA}/vectors_768.bin;LISA_TEST_QUERY=${LISA_TESTDATA}/query_768.txt;LISA_BUILD_COLLECTION=$<TARGET_FILE:build_collection>")
-
-    add_test(NAME test_api COMMAND bash ${CMAKE_SOURCE_DIR}/tests/test_api.sh)
-    set_tests_properties(test_api PROPERTIES
-        RUN_SERIAL TRUE
-        ENVIRONMENT "LISA_BIN=$<TARGET_FILE:lisa>")
+            "LISA_BIN=$<TARGET_FILE:lisa>;LISA_TEST_INDEX=${LISA_TESTDATA}/vectors_768.bin;LISA_BUILD_COLLECTION=$<TARGET_FILE:build_collection>;LISA_MODELS=${LISA_MODELS_DIR};LISA_FIXTURES=${CMAKE_SOURCE_DIR}/tests/fixtures")
+    if(LISA_SANITIZE)
+        # Same llama.cpp false positive as test_ask (see there).
+        set_tests_properties(test_cli PROPERTIES ENVIRONMENT
+            "LISA_BIN=$<TARGET_FILE:lisa>;LISA_TEST_INDEX=${LISA_TESTDATA}/vectors_768.bin;LISA_BUILD_COLLECTION=$<TARGET_FILE:build_collection>;LISA_MODELS=${LISA_MODELS_DIR};LISA_FIXTURES=${CMAKE_SOURCE_DIR}/tests/fixtures;ASAN_OPTIONS=detect_container_overflow=0")
+    endif()
 endif()
 
 # ---- benchmarks (off by default; performance work is plan L1) ------------

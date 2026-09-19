@@ -198,6 +198,17 @@ int lisa_collection_create(lisa_context_t* ctx, const char* path,
     return rc;
 }
 
+int lisa_collection_migrate_v1(lisa_context_t* ctx, const char* v1_path, const char* path,
+                               const char* embedding_model) {
+    if (ctx == NULL || v1_path == NULL || path == NULL || embedding_model == NULL ||
+        embedding_model[0] == '\0')
+        return LISA_E_INVALID_ARGUMENT;
+    int rc = ctx->has_crypto ? LISA_E_UNSUPPORTED
+                             : lisa_api_from_store(lisa_store_migrate_v1(v1_path, path, embedding_model));
+    lisa_api_audit(ctx, LISA_AUDIT_COLLECTION_CREATE, rc, NULL, path, 0, NULL);
+    return rc;
+}
+
 int lisa_collection_open(lisa_context_t* ctx, const char* path, lisa_open_mode mode,
                          const char* expected_model, lisa_collection_t** out) {
     if (out == NULL) return LISA_E_INVALID_ARGUMENT;

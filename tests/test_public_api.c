@@ -14,6 +14,7 @@
 
 #include "unity.h"
 #include "lisa.h"
+#include "../src/storage/storage.h"   /* only to build a v1 fixture */
 
 #define DIM 6
 #define MODEL "api-test-model"
@@ -451,6 +452,39 @@ static void test_auth_and_routes_are_installed(void) {
     lisa_context_destroy(ctx);
 }
 
+static void test_migrate_v1(void) {
+    lisa_context_t* ctx = NULL;
+    TEST_ASSERT_EQUAL_INT(LISA_OK, lisa_context_create(NULL, &ctx));
+    const float v[3 * 2] = { 0, 0,  1, 0,  5, 5 };
+    char src[600];
+    snprintf(src, sizeof(src), "%s_v1", g_path);
+    TEST_ASSERT_EQUAL_INT(0, storage_create(src, 3, 2, v));
+    TEST_ASSERT_EQUAL_INT(LISA_E_INVALID_ARGUMENT, lisa_collection_migrate_v1(ctx, src, g_path, ""));
+    TEST_ASSERT_EQUAL_INT(LISA_OK, lisa_collection_migrate_v1(ctx, src, g_path, "legacy-768"));
+    TEST_ASSERT_EQUAL_INT(LISA_E_EXISTS, lisa_collection_migrate_v1(ctx, src, g_path, "legacy-768"));
+    char missing[620];
+    snprintf(missing, sizeof(missing), "%s_nothing", g_path);
+    TEST_ASSERT_TRUE(lisa_collection_migrate_v1(ctx, missing, missing, "m") != LISA_OK);
+
+    lisa_collection_t* c = NULL;
+    TEST_ASSERT_EQUAL_INT(LISA_OK, lisa_collection_open(ctx, g_path, LISA_OPEN_READ, "legacy-768", &c));
+    lisa_collection_info_t info = LISA_COLLECTION_INFO_INIT;
+    TEST_ASSERT_EQUAL_INT(LISA_OK, lisa_collection_info(c, &info));
+    TEST_ASSERT_EQUAL_INT64(3, info.chunk_count);
+    TEST_ASSERT_EQUAL_INT64(2, info.dim);
+    const float q[2] = { 4.5f, 5 };
+    lisa_query_t qq = LISA_QUERY_INIT;
+    qq.vector = q;
+    qq.top_k = 1;
+    lisa_scored_hit_t h[1];
+    int64_t n = 0;
+    TEST_ASSERT_EQUAL_INT(LISA_OK, lisa_collection_query(c, &qq, h, 1, &n));
+    TEST_ASSERT_EQUAL_INT64(1, n);
+    TEST_ASSERT_EQUAL_UINT64(2, h[0].id);   /* old index 2 */
+    lisa_collection_close(c);
+    lisa_context_destroy(ctx);
+}
+
 int main(int argc, char** argv) {
     if (argc != 2) {
         fprintf(stderr, "usage: %s <scratch_dir>\n", argv[0]);
@@ -469,5 +503,6 @@ int main(int argc, char** argv) {
     RUN_TEST(test_audit_sink);
     RUN_TEST(test_storage_crypto_refuses_until_supported);
     RUN_TEST(test_auth_and_routes_are_installed);
+    RUN_TEST(test_migrate_v1);
     return UNITY_END() == 0 ? 0 : 1;
 }

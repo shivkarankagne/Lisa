@@ -237,19 +237,20 @@ Storage v1.1 known limitations (documented in src/storage/storage.h):
 - no concurrency control, single process only
 - no crash recovery
 
-## HTTP API tests
+## Interface tests (W9)
 
-    ./test_api.sh
+    ctest --test-dir build -R "test_http|test_cli" --output-on-failure
 
-What the API tests verify:
+`test_http` (C, real sockets, CivetWeb's client) runs the server in
+process. Without models: health, session token, Host and Origin
+rejection, name validation, methods, bad JSON, 1 MiB body limit, ingest
+path checks, unknown jobs, start errors, generated token, and the auth
+and HTTP-route extension points. With both models: an ingest job from
+queued to succeeded, collection listing, search, ask (JSON and
+Server-Sent Events), multi-message ask refused, unknown collection.
 
-- GET /health returns 200 with body "ok"
-- unknown paths return 404
-- POST /search with a valid collection returns 200, three lines,
-  first result is index 3 or 4 (a tie)
-- POST /search with a missing collection returns 404
-- POST /search with a wrong body size returns 400
-- POST /search without a collection parameter returns 400
-
-The server listens on 127.0.0.1 only. No TLS, no authentication.
-Read-only endpoints only.
+`test_cli.sh` runs the `lisa` binary: version, help, usage errors and
+exit codes, `migrate` of a LISA 0.1 collection, `serve` start, health,
+token, and clean stop on SIGINT; with models, `model --set` / `model`,
+`ingest` (and unchanged re-run), `search`, `ask` with sources, `--json`
+forms, and the not-found answer.
