@@ -8,7 +8,11 @@
 
 #include "lisa.h"
 
+#include <stdatomic.h>
 #include <string.h>
+
+#include "../models/models.h"
+#include "../storage/store.h"
 
 struct lisa_context {
     lisa_allocator_t        alloc;
@@ -38,5 +42,34 @@ static inline char* ctx_strdup(const lisa_context_t* ctx, const char* s) {
     if (d) memcpy(d, s, n);
     return d;
 }
+
+/*
+ * A collection or model owned by a running ingest job is "busy": every
+ * other call on it returns LISA_E_BUSY until the job ends.
+ */
+struct lisa_collection {
+    lisa_context_t* ctx;
+    lisa_store_t*   store;
+    char*           path;
+    int             mode;
+    atomic_int      busy;
+};
+
+struct lisa_model {
+    lisa_context_t* ctx;
+    lm_model_t*     lm;
+    atomic_int      busy;
+};
+
+#define API_BUSY(x) (atomic_load(&(x)->busy) != 0)
+
+/* Internal status mapping (defined in lisa_api.c / lisa_models.c). */
+int lisa_api_from_store(int rc);
+int lisa_api_from_lm(int rc);
+
+/* Emit an audit event if a sink is installed (lisa_api.c). */
+void lisa_api_audit(const lisa_context_t* ctx, lisa_audit_action action, int status,
+                    const lisa_principal_t* principal, const char* path,
+                    int64_t count, const uint64_t* ids);
 
 #endif /* LISA_API_INTERNAL_H */

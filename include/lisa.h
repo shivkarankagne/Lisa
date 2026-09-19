@@ -53,9 +53,9 @@ extern "C" {
 /* ==== Version ========================================================= */
 
 #define LISA_VERSION_MAJOR 0
-#define LISA_VERSION_MINOR 1
+#define LISA_VERSION_MINOR 2
 #define LISA_VERSION_PATCH 0
-#define LISA_VERSION_STRING "0.1.0"
+#define LISA_VERSION_STRING "0.2.0"
 
 /*
  * Version of the linked library (may differ from the header's macros if
@@ -185,7 +185,8 @@ typedef enum lisa_audit_action {
     LISA_AUDIT_CHUNKS_REMOVE     = 4,
     LISA_AUDIT_CHUNK_READ        = 5,
     LISA_AUDIT_SEARCH            = 6,
-    LISA_AUDIT_COMPACT           = 7
+    LISA_AUDIT_COMPACT           = 7,
+    LISA_AUDIT_INGEST            = 8   /* item_count = chunks added (since 0.2) */
 } lisa_audit_action;
 
 typedef struct lisa_audit_event {
@@ -313,6 +314,7 @@ typedef struct lisa_chunk {
     int64_t     length;        /* byte length, >= 0 */
     const char* text;
     const char* content_hash;  /* hash of the source document content */
+    int64_t     page;          /* 1-based page the chunk starts on; 0 if unpaged (since 0.2) */
 } lisa_chunk_t;
 
 typedef struct lisa_collection_info {
@@ -537,6 +539,114 @@ typedef enum lisa_embed_kind {
 LISA_API int lisa_embed(lisa_model_t* model, lisa_embed_kind kind,
                         const char* const* texts, int64_t count,
                         float* out, int64_t dim);
+
+/* ==== Ingest (since 0.2) =============================================== */
+/*
+ * Keep a collection in sync with files and folders: new and changed
+ * supported files (txt, md, pdf) are extracted, chunked, embedded, and
+ * stored; unchanged files are skipped without re-reading; documents whose
+ * files were deleted from a given folder are removed. Each document is
+ * replaced atomically, so searches during ingest see either its old or
+ * its new version.
+ */
+
+/*
+ * Create a collection for embeddings from `model` (an embedding model),
+ * recording the model's identity so ingest can check it later. dim: 0 for
+ * the model's native dimension, or smaller if the model supports
+ * truncated embeddings.
+ */
+LISA_API int lisa_collection_create_for_model(lisa_context_t* ctx, const char* path,
+                                              lisa_model_t* model, int64_t dim);
+
+typedef struct lisa_ingest_options {
+    size_t  struct_size;
+    int64_t chunk_chars;          /* target chunk size in characters; default 1000 */
+    int64_t chunk_max_chars;      /* hard limit; default 1500 */
+    int64_t chunk_overlap_chars;  /* default 150 */
+    int32_t include_hidden;       /* also index names starting with "."; default 0 */
+} lisa_ingest_options_t;
+
+#define LISA_INGEST_OPTIONS_INIT { sizeof(lisa_ingest_options_t), 1000, 1500, 150, 0 }
+
+typedef enum lisa_job_state {
+    LISA_JOB_RUNNING   = 1,
+    LISA_JOB_SUCCEEDED = 2,
+    LISA_JOB_FAILED    = 3,
+    LISA_JOB_CANCELLED = 4
+} lisa_job_state;
+
+typedef struct lisa_ingest_status {
+    size_t         struct_size;
+    lisa_job_state state;
+    int            status;           /* LISA_OK, or why the job failed */
+    int64_t        files_seen;       /* supported files found so far */
+    int64_t        files_added;
+    int64_t        files_updated;
+    int64_t        files_unchanged;
+    int64_t        files_no_text;    /* e.g. scanned PDFs */
+    int64_t        files_failed;     /* unreadable, corrupt, encrypted, ... */
+    int64_t        files_removed;
+    int64_t        files_skipped;    /* unsupported file types */
+    int64_t        chunks_added;
+    int64_t        chunks_removed;
+    double         elapsed_seconds;
+} lisa_ingest_status_t;
+
+#define LISA_INGEST_STATUS_INIT { sizeof(lisa_ingest_status_t), LISA_JOB_RUNNING, 0, \
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.0 }
+
+typedef struct lisa_ingest_job lisa_ingest_job_t;
+
+/*
+ * Start ingesting paths (files or folders) into coll on a background
+ * thread. coll must be open with LISA_OPEN_WRITE; embed_model must be the
+ * embedding model the collection was created for (else
+ * LISA_E_MODEL_MISMATCH). Every path must exist (else LISA_E_NOT_FOUND
+ * and nothing starts). Until the job is released, coll and embed_model
+ * belong to the job: other calls on them return LISA_E_BUSY. Open a
+ * separate LISA_OPEN_READ handle (and model) to search meanwhile.
+ * options may be NULL. Release the job with lisa_ingest_free.
+ */
+LISA_API int lisa_ingest_start(lisa_collection_t* coll, lisa_model_t* embed_model,
+                               const char* const* paths, int64_t count,
+                               const lisa_ingest_options_t* options,
+                               lisa_ingest_job_t** out);
+
+/* Current progress (set status->struct_size first). */
+LISA_API int lisa_ingest_status(lisa_ingest_job_t* job, lisa_ingest_status_t* status);
+
+/* Ask the job to stop after the current document. Returns immediately. */
+LISA_API void lisa_ingest_cancel(lisa_ingest_job_t* job);
+
+/* Wait for the job to finish; returns its final status code. status may be NULL. */
+LISA_API int lisa_ingest_wait(lisa_ingest_job_t* job, lisa_ingest_status_t* status);
+
+/* Cancel if still running, wait, and release the job. NULL is ignored. */
+LISA_API void lisa_ingest_free(lisa_ingest_job_t* job);
+
+/* Blocking form: start + wait + free. status may be NULL. */
+LISA_API int lisa_ingest(lisa_collection_t* coll, lisa_model_t* embed_model,
+                         const char* const* paths, int64_t count,
+                         const lisa_ingest_options_t* options,
+                         lisa_ingest_status_t* status);
+
+/* A document known to a collection (valid only during the callback). */
+typedef struct lisa_document {
+    const char* path;
+    const char* title;
+    const char* status;       /* "ok", "no_text", or "error" */
+    const char* message;      /* why, for "error" */
+    int64_t     chunk_count;
+    int64_t     size;
+} lisa_document_t;
+
+/* Return non-zero to stop the listing. */
+typedef int (*lisa_document_fn)(void* user, const lisa_document_t* doc);
+
+/* Visit documents whose path starts with path_prefix (all if NULL), by path. */
+LISA_API int lisa_collection_documents(lisa_collection_t* coll, const char* path_prefix,
+                                       lisa_document_fn fn, void* user);
 
 /* ==== Memory returned by LISA ========================================= */
 

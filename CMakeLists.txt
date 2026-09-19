@@ -13,7 +13,7 @@
 #   ctest --test-dir build-asan --output-on-failure
 
 cmake_minimum_required(VERSION 3.20)
-project(lisa VERSION 0.1.0 LANGUAGES C CXX ASM)
+project(lisa VERSION 0.2.0 LANGUAGES C CXX ASM)
 
 option(LISA_SANITIZE         "Build with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
 option(LISA_BUILD_TESTS      "Build tests"      ON)
@@ -131,6 +131,7 @@ endif()
 add_library(lisa_core STATIC
     src/api/lisa_api.c
     src/api/lisa_models.c
+    src/api/lisa_ingest.c
     src/models/models.c
     src/documents/documents.c
     src/documents/markdown.c
@@ -219,6 +220,12 @@ if(LISA_BUILD_TESTS)
     add_test(NAME test_ingest
              COMMAND test_ingest ${CMAKE_BINARY_DIR}/scratch ${CMAKE_SOURCE_DIR}/tests/fixtures ${LISA_MODELS_DIR})
     set_tests_properties(test_ingest PROPERTIES TIMEOUT 1800)
+
+    add_executable(test_ingest_api tests/test_ingest_api.c)
+    target_link_libraries(test_ingest_api PRIVATE lisa_core lisa_unity)
+    add_test(NAME test_ingest_api
+             COMMAND test_ingest_api ${CMAKE_BINARY_DIR}/scratch ${CMAKE_SOURCE_DIR}/tests/fixtures ${LISA_MODELS_DIR})
+    set_tests_properties(test_ingest_api PROPERTIES TIMEOUT 1800)
 
     add_executable(test_sqlite tests/test_sqlite.c)
     target_link_libraries(test_sqlite PRIVATE lisa_core lisa_sqlite lisa_unity)

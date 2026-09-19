@@ -191,6 +191,7 @@ void lm_get_info(const lm_model_t* m, lm_info_t* out) {
     out->is_embedding = m->profile->is_embedding;
     out->embedding_dim = out->is_embedding ? llama_model_n_embd_out(m->model) : 0;
     out->gpu_offloaded = m->gpu_layers != 0;
+    out->supports_truncation = m->profile->supports_truncation;
 }
 
 /* ==== Verification ==================================================== */

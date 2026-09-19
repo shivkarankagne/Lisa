@@ -14,7 +14,6 @@
 #include <string.h>
 
 #include "../retrieval/retrieval.h"
-#include "../storage/store.h"
 
 #define MAX_TOP_K 10000
 
@@ -49,7 +48,7 @@ const char* lisa_status_string(int status) {
     }
 }
 
-static int from_store(int rc) {
+int lisa_api_from_store(int rc) {
     switch (rc) {
     case LISA_STORE_OK:        return LISA_OK;
     case LISA_STORE_EINVAL:    return LISA_E_INVALID_ARGUMENT;
@@ -171,9 +170,9 @@ const lisa_http_routes_t* lisa_context_http_routes(const lisa_context_t* ctx) {
 
 /* ==== Audit =========================================================== */
 
-static void audit(const lisa_context_t* ctx, lisa_audit_action action, int status,
-                  const lisa_principal_t* principal, const char* path,
-                  int64_t count, const uint64_t* ids) {
+void lisa_api_audit(const lisa_context_t* ctx, lisa_audit_action action, int status,
+                    const lisa_principal_t* principal, const char* path,
+                    int64_t count, const uint64_t* ids) {
     if (!ctx->has_audit) return;
     lisa_audit_event_t ev;
     memset(&ev, 0, sizeof(ev));
@@ -189,18 +188,13 @@ static void audit(const lisa_context_t* ctx, lisa_audit_action action, int statu
 
 /* ==== Collections ===================================================== */
 
-struct lisa_collection {
-    lisa_context_t* ctx;
-    lisa_store_t*   store;
-    char*           path;
-};
 
 int lisa_collection_create(lisa_context_t* ctx, const char* path,
                            const char* embedding_model, int64_t dim) {
     if (ctx == NULL || path == NULL || embedding_model == NULL) return LISA_E_INVALID_ARGUMENT;
     int rc = ctx->has_crypto ? LISA_E_UNSUPPORTED
-                             : from_store(lisa_store_create(path, embedding_model, dim));
-    audit(ctx, LISA_AUDIT_COLLECTION_CREATE, rc, NULL, path, 0, NULL);
+                             : lisa_api_from_store(lisa_store_create(path, embedding_model, dim));
+    lisa_api_audit(ctx, LISA_AUDIT_COLLECTION_CREATE, rc, NULL, path, 0, NULL);
     return rc;
 }
 
@@ -221,14 +215,16 @@ int lisa_collection_open(lisa_context_t* ctx, const char* path, lisa_open_mode m
     if (rc == LISA_OK) {
         memset(c, 0, sizeof(*c));
         c->ctx = ctx;
+        c->mode = mode;
+        atomic_init(&c->busy, 0);
         c->path = ctx_strdup(ctx, path);
         if (c->path == NULL) rc = LISA_E_NO_MEMORY;
     }
     if (rc == LISA_OK) {
         int smode = mode == LISA_OPEN_WRITE ? LISA_STORE_WRITE : LISA_STORE_READ;
-        rc = from_store(lisa_store_open(path, smode, expected_model, &c->store));
+        rc = lisa_api_from_store(lisa_store_open(path, smode, expected_model, &c->store));
     }
-    audit(ctx, LISA_AUDIT_COLLECTION_OPEN, rc, NULL, path, 0, NULL);
+    lisa_api_audit(ctx, LISA_AUDIT_COLLECTION_OPEN, rc, NULL, path, 0, NULL);
     if (rc != LISA_OK) {
         lisa_collection_close(c);
         return rc;
@@ -247,6 +243,7 @@ void lisa_collection_close(lisa_collection_t* c) {
 int lisa_collection_info(const lisa_collection_t* c, lisa_collection_info_t* info) {
     if (c == NULL || info == NULL || info->struct_size < sizeof(size_t))
         return LISA_E_INVALID_ARGUMENT;
+    if (API_BUSY(c)) return LISA_E_BUSY;
     if (HAS_FIELD(info, lisa_collection_info_t, embedding_model))
         info->embedding_model = lisa_store_model(c->store);
     if (HAS_FIELD(info, lisa_collection_info_t, dim)) info->dim = lisa_store_dim(c->store);
@@ -257,13 +254,15 @@ int lisa_collection_info(const lisa_collection_t* c, lisa_collection_info_t* inf
 
 int lisa_collection_refresh(lisa_collection_t* c) {
     if (c == NULL) return LISA_E_INVALID_ARGUMENT;
-    return from_store(lisa_store_refresh(c->store));
+    if (API_BUSY(c)) return LISA_E_BUSY;
+    return lisa_api_from_store(lisa_store_refresh(c->store));
 }
 
 int lisa_collection_add(lisa_collection_t* c, int64_t count, const float* vectors,
                         const lisa_chunk_t* chunks, uint64_t* out_ids) {
     if (c == NULL || count <= 0 || vectors == NULL || chunks == NULL)
         return LISA_E_INVALID_ARGUMENT;
+    if (API_BUSY(c)) return LISA_E_BUSY;
 
     lisa_store_chunk_t* sc =
         (lisa_store_chunk_t*)ctx_alloc(c->ctx, (size_t)count * sizeof(*sc));
@@ -281,10 +280,10 @@ int lisa_collection_add(lisa_collection_t* c, int64_t count, const float* vector
         sc[i].length = chunks[i].length;
         sc[i].text = (char*)chunks[i].text;
         sc[i].content_hash = (char*)chunks[i].content_hash;
-        sc[i].page = 0;
+        sc[i].page = chunks[i].page;
     }
-    if (rc == LISA_OK) rc = from_store(lisa_store_insert(c->store, count, vectors, sc, ids));
-    audit(c->ctx, LISA_AUDIT_CHUNKS_ADD, rc, NULL, c->path,
+    if (rc == LISA_OK) rc = lisa_api_from_store(lisa_store_insert(c->store, count, vectors, sc, ids));
+    lisa_api_audit(c->ctx, LISA_AUDIT_CHUNKS_ADD, rc, NULL, c->path,
           rc == LISA_OK ? count : 0, rc == LISA_OK ? ids : NULL);
 
     ctx_free(c->ctx, sc);
@@ -294,8 +293,9 @@ int lisa_collection_add(lisa_collection_t* c, int64_t count, const float* vector
 
 int lisa_collection_remove(lisa_collection_t* c, int64_t count, const uint64_t* ids) {
     if (c == NULL || count <= 0 || ids == NULL) return LISA_E_INVALID_ARGUMENT;
-    int rc = from_store(lisa_store_delete(c->store, count, ids));
-    audit(c->ctx, LISA_AUDIT_CHUNKS_REMOVE, rc, NULL, c->path,
+    if (API_BUSY(c)) return LISA_E_BUSY;
+    int rc = lisa_api_from_store(lisa_store_delete(c->store, count, ids));
+    lisa_api_audit(c->ctx, LISA_AUDIT_CHUNKS_REMOVE, rc, NULL, c->path,
           rc == LISA_OK ? count : 0, rc == LISA_OK ? ids : NULL);
     return rc;
 }
@@ -304,9 +304,10 @@ int lisa_collection_remove_document(lisa_collection_t* c, const char* doc_id,
                                     int64_t* out_removed) {
     if (out_removed) *out_removed = 0;
     if (c == NULL || doc_id == NULL) return LISA_E_INVALID_ARGUMENT;
+    if (API_BUSY(c)) return LISA_E_BUSY;
     int64_t n = 0;
-    int rc = from_store(lisa_store_delete_doc(c->store, doc_id, &n));
-    audit(c->ctx, LISA_AUDIT_CHUNKS_REMOVE, rc, NULL, c->path, rc == LISA_OK ? n : 0, NULL);
+    int rc = lisa_api_from_store(lisa_store_delete_doc(c->store, doc_id, &n));
+    lisa_api_audit(c->ctx, LISA_AUDIT_CHUNKS_REMOVE, rc, NULL, c->path, rc == LISA_OK ? n : 0, NULL);
     if (rc == LISA_OK && out_removed) *out_removed = n;
     return rc;
 }
@@ -322,9 +323,10 @@ int lisa_collection_get_chunk(lisa_collection_t* c, uint64_t id, lisa_chunk_t** 
     if (out == NULL) return LISA_E_INVALID_ARGUMENT;
     *out = NULL;
     if (c == NULL) return LISA_E_INVALID_ARGUMENT;
+    if (API_BUSY(c)) return LISA_E_BUSY;
 
     lisa_store_chunk_t sc;
-    int rc = from_store(lisa_store_get(c->store, id, &sc));
+    int rc = lisa_api_from_store(lisa_store_get(c->store, id, &sc));
     if (rc == LISA_OK) {
         size_t l1 = strlen(sc.doc_id) + 1, l2 = strlen(sc.source_path) + 1;
         size_t l3 = strlen(sc.text) + 1, l4 = strlen(sc.content_hash) + 1;
@@ -342,11 +344,12 @@ int lisa_collection_get_chunk(lisa_collection_t* c, uint64_t id, lisa_chunk_t** 
             b->chunk.chunk_index = sc.chunk_index;
             b->chunk.offset = sc.offset;
             b->chunk.length = sc.length;
+            b->chunk.page = sc.page;
             *out = &b->chunk;
         }
         lisa_store_chunk_free(&sc);
     }
-    audit(c->ctx, LISA_AUDIT_CHUNK_READ, rc, NULL, c->path, rc == LISA_OK ? 1 : 0,
+    lisa_api_audit(c->ctx, LISA_AUDIT_CHUNK_READ, rc, NULL, c->path, rc == LISA_OK ? 1 : 0,
           rc == LISA_OK ? &id : NULL);
     return rc;
 }
@@ -359,8 +362,9 @@ void lisa_chunk_free(lisa_chunk_t* chunk) {
 
 int lisa_collection_compact(lisa_collection_t* c) {
     if (c == NULL) return LISA_E_INVALID_ARGUMENT;
-    int rc = from_store(lisa_store_compact(c->store));
-    audit(c->ctx, LISA_AUDIT_COMPACT, rc, NULL, c->path, 0, NULL);
+    if (API_BUSY(c)) return LISA_E_BUSY;
+    int rc = lisa_api_from_store(lisa_store_compact(c->store));
+    lisa_api_audit(c->ctx, LISA_AUDIT_COMPACT, rc, NULL, c->path, 0, NULL);
     return rc;
 }
 
@@ -371,7 +375,7 @@ static int search_vector(lisa_collection_t* c, const float* query, int64_t top_k
                          int64_t capacity, int64_t* out_count, uint64_t** out_ids) {
     const lisa_context_t* ctx = c->ctx;
     lisa_store_view_t v;
-    int rc = from_store(lisa_store_view(c->store, &v));
+    int rc = lisa_api_from_store(lisa_store_view(c->store, &v));
     if (rc != LISA_OK) return rc;
     int64_t k = top_k < capacity ? top_k : capacity;
     if (v.n_slots == 0 || k == 0) return LISA_OK;
@@ -443,10 +447,11 @@ int lisa_collection_search_vector(lisa_collection_t* c, const float* query,
         if (HAS_FIELD(options, lisa_search_options_t, principal)) principal = options->principal;
     }
     if (top_k < 1 || top_k > MAX_TOP_K) return LISA_E_INVALID_ARGUMENT;
+    if (API_BUSY(c)) return LISA_E_BUSY;
 
     uint64_t* ids = NULL;
     int rc = search_vector(c, query, top_k, principal, hits, capacity, out_count, &ids);
-    audit(c->ctx, LISA_AUDIT_SEARCH, rc, principal, c->path, rc == LISA_OK ? *out_count : 0,
+    lisa_api_audit(c->ctx, LISA_AUDIT_SEARCH, rc, principal, c->path, rc == LISA_OK ? *out_count : 0,
           rc == LISA_OK ? ids : NULL);
     ctx_free(c->ctx, ids);
     return rc;

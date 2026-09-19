@@ -8,16 +8,11 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../models/models.h"
 
 #define MAX_GENERATE_TOKENS 32768
 
-struct lisa_model {
-    lisa_context_t* ctx;
-    lm_model_t*     lm;
-};
 
-static int from_lm(int rc) {
+int lisa_api_from_lm(int rc) {
     switch (rc) {
     case LM_OK:         return LISA_OK;
     case LM_EINVAL:     return LISA_E_INVALID_ARGUMENT;
@@ -53,7 +48,8 @@ int lisa_model_load(lisa_context_t* ctx, const char* path,
     lisa_model_t* m = (lisa_model_t*)ctx_alloc(ctx, sizeof(*m));
     if (m == NULL) return LISA_E_NO_MEMORY;
     m->ctx = ctx;
-    int rc = from_lm(lm_load(path, &p, &m->lm));
+    atomic_init(&m->busy, 0);
+    int rc = lisa_api_from_lm(lm_load(path, &p, &m->lm));
     if (rc != LISA_OK) {
         ctx_free(ctx, m);
         return rc;
@@ -71,6 +67,7 @@ void lisa_model_free(lisa_model_t* m) {
 int lisa_model_info(const lisa_model_t* m, lisa_model_info_t* info) {
     if (m == NULL || info == NULL || info->struct_size < sizeof(size_t))
         return LISA_E_INVALID_ARGUMENT;
+    if (API_BUSY(m)) return LISA_E_BUSY;
     lm_info_t li;
     lm_get_info(m->lm, &li);
     if (HAS_FIELD(info, lisa_model_info_t, name)) info->name = li.name;
@@ -118,7 +115,7 @@ int lisa_model_verify(const char* path, lisa_known_model_t* match, char* sha256_
         return LISA_OK;
     }
     if (rc == LM_EFORMAT) return LISA_E_UNSUPPORTED;
-    return from_lm(rc);
+    return lisa_api_from_lm(rc);
 }
 
 /* ---- generation ------------------------------------------------------- */
@@ -145,7 +142,7 @@ static int generate(lisa_model_t* m, const char* prompt, const lm_gen_params_t* 
                     char** out_text, int64_t* out_tokens) {
     char* text = NULL;
     int64_t tokens = 0;
-    int rc = from_lm(lm_generate(m->lm, prompt, p, out_text ? &text : NULL, &tokens));
+    int rc = lisa_api_from_lm(lm_generate(m->lm, prompt, p, out_text ? &text : NULL, &tokens));
     if (rc == LISA_OK && out_text) {
         *out_text = ctx_strdup(m->ctx, text);
         if (*out_text == NULL) rc = LISA_E_NO_MEMORY;
@@ -160,6 +157,7 @@ int lisa_generate(lisa_model_t* m, const char* prompt, const lisa_generate_optio
     if (out_text) *out_text = NULL;
     if (out_tokens) *out_tokens = 0;
     if (m == NULL || prompt == NULL) return LISA_E_INVALID_ARGUMENT;
+    if (API_BUSY(m)) return LISA_E_BUSY;
     lm_gen_params_t p;
     int rc = gen_params(options, &p);
     if (rc != LISA_OK) return rc;
@@ -171,13 +169,14 @@ int lisa_chat(lisa_model_t* m, const lisa_message_t* messages, int64_t count,
     if (out_text) *out_text = NULL;
     if (out_tokens) *out_tokens = 0;
     if (m == NULL || messages == NULL || count <= 0) return LISA_E_INVALID_ARGUMENT;
+    if (API_BUSY(m)) return LISA_E_BUSY;
     lm_gen_params_t p;
     int rc = gen_params(options, &p);
     if (rc != LISA_OK) return rc;
 
     /* lisa_message_t and lm_message_t have the same layout by design. */
     char* prompt = NULL;
-    rc = from_lm(lm_format_chat(m->lm, (const lm_message_t*)messages, count, 1, &prompt));
+    rc = lisa_api_from_lm(lm_format_chat(m->lm, (const lm_message_t*)messages, count, 1, &prompt));
     if (rc == LISA_OK) rc = generate(m, prompt, &p, out_text, out_tokens);
     free(prompt);
     return rc;
@@ -189,8 +188,9 @@ int lisa_embed(lisa_model_t* m, lisa_embed_kind kind, const char* const* texts,
                int64_t count, float* out, int64_t dim) {
     if (m == NULL || texts == NULL || count <= 0 || out == NULL || dim < 0)
         return LISA_E_INVALID_ARGUMENT;
+    if (API_BUSY(m)) return LISA_E_BUSY;
     int lk = kind == LISA_EMBED_QUERY ? LM_EMBED_QUERY
            : kind == LISA_EMBED_DOCUMENT ? LM_EMBED_DOCUMENT : -1;
     if (lk < 0) return LISA_E_INVALID_ARGUMENT;
-    return from_lm(lm_embed(m->lm, lk, texts, count, out, dim));
+    return lisa_api_from_lm(lm_embed(m->lm, lk, texts, count, out, dim));
 }

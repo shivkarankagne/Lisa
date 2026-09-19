@@ -93,6 +93,7 @@ typedef struct {
     int64_t     embedding_dim;    /* output dim for embedding models, else 0 */
     int         is_embedding;
     int         gpu_offloaded;    /* 1 if layers run on the GPU */
+    int         supports_truncation; /* embedding dims may be shortened */
 } lm_info_t;
 
 void lm_get_info(const lm_model_t* m, lm_info_t* out);
