@@ -313,6 +313,31 @@ static void test_static_files_and_settings(void) {
     TEST_ASSERT_EQUAL_INT(400, http_at(port, "POST", "/v1/settings", h, 1, "{\"chat_model\":\"relative.gguf\"}"));
     TEST_ASSERT_EQUAL_INT(400, http_at(port, "POST", "/v1/settings", h, 1, "{\"chat_model\":\"/no/such.gguf\"}"));
     TEST_ASSERT_EQUAL_INT(405, http_at(port, "DELETE", "/v1/settings", h, 1, NULL));
+    /* Watched folders: set, read back, and rejected when wrong. */
+    char watch[1200];
+    snprintf(watch, sizeof(watch), "{\"watch\":{\"collection\":\"watched\",\"folders\":[\"%s\"]}}", g_scratch);
+    TEST_ASSERT_EQUAL_INT(200, http_at(port, "POST", "/v1/settings", h, 1, watch));
+    TEST_ASSERT_EQUAL_STRING("false", field("restart_required", b, sizeof(b)));   /* applies at once */
+    TEST_ASSERT_EQUAL_STRING("true", field("watching", b, sizeof(b)));
+    TEST_ASSERT_EQUAL_INT(200, http_at(port, "GET", "/v1/settings", h, 1, NULL));
+    TEST_ASSERT_EQUAL_STRING("watched", field("watch.collection", b, sizeof(b)));
+    TEST_ASSERT_NOT_NULL(strstr(g_body, g_scratch));
+    TEST_ASSERT_NOT_NULL(strstr(g_body, "\"suggested\""));
+    TEST_ASSERT_EQUAL_INT(400, http_at(port, "POST", "/v1/settings", h, 1,
+                                       "{\"watch\":{\"collection\":\"watched\",\"folders\":[\"relative\"]}}"));
+    TEST_ASSERT_EQUAL_INT(400, http_at(port, "POST", "/v1/settings", h, 1,
+                                       "{\"watch\":{\"collection\":\"bad name\",\"folders\":[\"/tmp\"]}}"));
+    TEST_ASSERT_EQUAL_INT(400, http_at(port, "POST", "/v1/settings", h, 1,
+                                       "{\"watch\":{\"collection\":\"watched\",\"folders\":[\"/no/such/folder\"]}}"));
+    /* Stop watching. */
+    TEST_ASSERT_EQUAL_INT(200, http_at(port, "POST", "/v1/settings", h, 1,
+                                       "{\"watch\":{\"collection\":null,\"folders\":[]}}"));
+
+    /* The job list. */
+    TEST_ASSERT_EQUAL_INT(200, http_at(port, "GET", "/v1/jobs", h, 1, NULL));
+    TEST_ASSERT_NOT_NULL(strstr(g_body, "\"jobs\""));
+    TEST_ASSERT_EQUAL_INT(405, http_at(port, "POST", "/v1/jobs", h, 1, "{}"));
+
     if (g_have_models) {
         char body[1200];
         /* The embedding model is not a chat model. */

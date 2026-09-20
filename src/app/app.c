@@ -48,6 +48,24 @@ static int read_config(app_t* app, const char** err) {
             if (app->config_model[k] == NULL) rc = LISA_E_NO_MEMORY;
         }
     }
+    yyjson_val* watch = yyjson_obj_get(root, "watch");
+    if (rc == LISA_OK && yyjson_is_obj(watch)) {
+        const char* coll = yyjson_get_str(yyjson_obj_get(watch, "collection"));
+        yyjson_val* folders = yyjson_obj_get(watch, "folders");
+        if (coll && coll[0] && app_valid_name(coll)) {
+            app->watch.collection = dup_str(coll);
+            if (app->watch.collection == NULL) rc = LISA_E_NO_MEMORY;
+        }
+        size_t idx, max;
+        yyjson_val* v;
+        yyjson_arr_foreach(folders, idx, max, v) {
+            const char* f = yyjson_get_str(v);
+            if (rc != LISA_OK || f == NULL || app->watch.n_folders >= APP_MAX_WATCHED) break;
+            app->watch.folders[app->watch.n_folders] = dup_str(f);
+            if (app->watch.folders[app->watch.n_folders] == NULL) rc = LISA_E_NO_MEMORY;
+            else app->watch.n_folders++;
+        }
+    }
     yyjson_doc_free(doc);
     return rc;
 }
@@ -61,6 +79,13 @@ static int write_config(const app_t* app) {
     yyjson_mut_val* models = yyjson_mut_obj_add_obj(doc, root, "models");
     for (int k = 0; k < 2; k++) {
         if (app->config_model[k]) yyjson_mut_obj_add_str(doc, models, k_kind_key[k], app->config_model[k]);
+    }
+    if (app->watch.collection) {
+        yyjson_mut_val* w = yyjson_mut_obj_add_obj(doc, root, "watch");
+        yyjson_mut_obj_add_str(doc, w, "collection", app->watch.collection);
+        yyjson_mut_val* arr = yyjson_mut_obj_add_arr(doc, w, "folders");
+        for (int i = 0; i < app->watch.n_folders; i++)
+            yyjson_mut_arr_add_str(doc, arr, app->watch.folders[i]);
     }
     size_t len = 0;
     char* json = yyjson_mut_write(doc, YYJSON_WRITE_PRETTY, &len);
@@ -134,6 +159,8 @@ void app_close(app_t* app) {
     free(app->config_path);
     free(app->config_model[0]);
     free(app->config_model[1]);
+    free(app->watch.collection);
+    for (int i = 0; i < app->watch.n_folders; i++) free(app->watch.folders[i]);
     memset(app, 0, sizeof(*app));
 }
 
@@ -237,6 +264,53 @@ int app_set_model(app_t* app, app_model_kind kind, const char* path) {
     }
     free(old);
     return LISA_OK;
+}
+
+int app_set_watch(app_t* app, const char* collection, const char* const* folders, int count) {
+    if (count < 0 || count > APP_MAX_WATCHED) return LISA_E_INVALID_ARGUMENT;
+    if (count > 0 && (collection == NULL || !app_valid_name(collection))) return LISA_E_INVALID_ARGUMENT;
+
+    app_watch_t fresh;
+    memset(&fresh, 0, sizeof(fresh));
+    if (count > 0) {
+        fresh.collection = dup_str(collection);
+        if (fresh.collection == NULL) return LISA_E_NO_MEMORY;
+    }
+    for (int i = 0; i < count; i++) {
+        char* abs = folders[i] ? lisa_path_absolute(folders[i]) : NULL;
+        if (abs == NULL || !lisa_path_is_dir(abs)) {
+            free(abs);
+            for (int k = 0; k < fresh.n_folders; k++) free(fresh.folders[k]);
+            free(fresh.collection);
+            return LISA_E_NOT_FOUND;
+        }
+        fresh.folders[fresh.n_folders++] = abs;
+    }
+
+    app_watch_t old = app->watch;
+    app->watch = fresh;
+    int rc = write_config(app);
+    if (rc != LISA_OK) {
+        app->watch = old;
+        for (int i = 0; i < fresh.n_folders; i++) free(fresh.folders[i]);
+        free(fresh.collection);
+        return rc;
+    }
+    for (int i = 0; i < old.n_folders; i++) free(old.folders[i]);
+    free(old.collection);
+    return LISA_OK;
+}
+
+int app_default_watch_folders(char** out, int cap) {
+    static const char* const k_names[] = { "Documents", "Desktop", "Downloads" };
+    const char* home = getenv("HOME");
+    int n = 0;
+    for (size_t i = 0; home && i < sizeof(k_names) / sizeof(k_names[0]) && n < cap; i++) {
+        char* p = lisa_path_join(home, k_names[i]);
+        if (p && lisa_path_is_dir(p)) out[n++] = p;
+        else free(p);
+    }
+    return n;
 }
 
 int app_load_model(const app_t* app, app_model_kind kind, lisa_model_t** out, const char** err) {

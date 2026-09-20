@@ -17,6 +17,13 @@
 
 #define DEFAULT_CONTEXT   4096
 #define EMBED_CONTEXT     8192   /* chunks are <= 1,500 chars; dense scripts can exceed 2,048 tokens */
+/*
+ * Passages embedded in one GPU call. The context is shared, so each
+ * sequence may use EMBED_CONTEXT / EMBED_MAX_SEQ tokens; a longer passage
+ * is embedded on its own. Batching is what makes indexing fast: one call
+ * per passage leaves the GPU idle between calls.
+ */
+#define EMBED_MAX_SEQ     8
 #define PROMPT_BATCH      512
 #define PENALTY_LAST_N    64
 
@@ -262,7 +269,7 @@ static int ensure_emb_ctx(lm_model_t* m) {
     cp.n_ctx = (uint32_t)n;
     cp.n_batch = (uint32_t)n;   /* pooled embeddings need the whole sequence in one batch */
     cp.n_ubatch = (uint32_t)n;
-    cp.n_seq_max = 1;
+    cp.n_seq_max = EMBED_MAX_SEQ;
     cp.embeddings = true;
     cp.no_perf = true;
     if (m->threads > 0) {
@@ -492,6 +499,13 @@ int lm_generate(lm_model_t* m, const char* prompt, const lm_gen_params_t* p,
         p->on_token(p->on_token_user, out.data + out.emitted, (int64_t)(out.len - out.emitted));
 
     llama_sampler_free(smpl);
+    /*
+     * Nothing generated: the model produced no text at all. This happens
+     * when the GPU cannot allocate (Metal reports the failure after
+     * llama_decode has already returned success) and sampling then ends
+     * the sequence at once. An empty answer is never useful, so report it.
+     */
+    if (rc == LM_OK && produced == 0) rc = LM_ERUNTIME;
     if (rc != LM_OK) {
         free(out.data);
         return rc;
@@ -521,62 +535,103 @@ int lm_embed(lm_model_t* m, int kind, const char* const* texts, int64_t n,
                                                 : m->profile->document_prefix;
     if (prefix == NULL) prefix = "";
 
+    /*
+     * Tokenise every passage first, then embed as many as fit in one call
+     * (at most EMBED_MAX_SEQ sequences, and no more tokens than the
+     * context holds). Each sequence is pooled separately by llama.cpp, so
+     * the vectors are the same as embedding them one at a time.
+     */
+    int64_t per_seq = n_ctx / EMBED_MAX_SEQ;
+    llama_token** toks = (llama_token**)calloc((size_t)n, sizeof(llama_token*));
+    int32_t* lens = (int32_t*)calloc((size_t)n, sizeof(int32_t));
+    if (toks == NULL || lens == NULL) {
+        free(toks);
+        free(lens);
+        return LM_ENOMEM;
+    }
     for (int64_t i = 0; i < n && rc == LM_OK; i++) {
-        if (texts[i] == NULL) return LM_EINVAL;
+        if (texts[i] == NULL) {
+            rc = LM_EINVAL;
+            break;
+        }
         size_t pl = strlen(prefix), tl = strlen(texts[i]);
         char* input = (char*)malloc(pl + tl + 1);
-        if (input == NULL) return LM_ENOMEM;
+        if (input == NULL) {
+            rc = LM_ENOMEM;
+            break;
+        }
         memcpy(input, prefix, pl);
         memcpy(input + pl, texts[i], tl + 1);
-
-        llama_token* toks = NULL;
-        int32_t nt = 0;
-        rc = tokenize(m, input, 1, 0, &toks, &nt);
+        rc = tokenize(m, input, 1, 0, &toks[i], &lens[i]);
         free(input);
-        if (rc != LM_OK) return rc;
+        if (rc != LM_OK) break;
 
         /* Last-token pooling needs the end-of-text token as the last token. */
         if (m->profile->append_eos && !llama_vocab_get_add_eos(m->vocab)) {
-            llama_token* g = (llama_token*)realloc(toks, (size_t)(nt + 1) * sizeof(llama_token));
+            llama_token* g = (llama_token*)realloc(toks[i], (size_t)(lens[i] + 1) * sizeof(llama_token));
             if (g == NULL) {
-                free(toks);
-                return LM_ENOMEM;
+                rc = LM_ENOMEM;
+                break;
             }
-            toks = g;
-            toks[nt++] = llama_vocab_eos(m->vocab);
+            toks[i] = g;
+            toks[i][lens[i]++] = llama_vocab_eos(m->vocab);
         }
-        if (nt == 0 || nt > n_ctx) {
-            free(toks);
-            return nt == 0 ? LM_EINVAL : LM_ECONTEXT;
+        if (lens[i] == 0) rc = LM_EINVAL;
+        else if (lens[i] > n_ctx) rc = LM_ECONTEXT;
+    }
+
+    for (int64_t first = 0; rc == LM_OK && first < n; ) {
+        /* How many passages fit in this call. */
+        int64_t count = 0, tokens = 0;
+        while (first + count < n && count < EMBED_MAX_SEQ) {
+            int32_t len = lens[first + count];
+            if (count > 0 && (len > per_seq || tokens + len > n_ctx)) break;
+            tokens += len;
+            count++;
+            if (len > per_seq) break;   /* a long passage goes alone */
         }
 
         llama_memory_clear(llama_get_memory(m->emb_ctx), true);
-        struct llama_batch batch = llama_batch_init(nt, 0, 1);
-        for (int32_t t = 0; t < nt; t++) {
-            batch.token[t] = toks[t];
-            batch.pos[t] = t;
-            batch.n_seq_id[t] = 1;
-            batch.seq_id[t][0] = 0;
-            batch.logits[t] = 1;
+        struct llama_batch batch = llama_batch_init((int32_t)tokens, 0, (int32_t)count);
+        int32_t at = 0;
+        for (int64_t k = 0; k < count; k++) {
+            for (int32_t t = 0; t < lens[first + k]; t++, at++) {
+                batch.token[at] = toks[first + k][t];
+                batch.pos[at] = t;
+                batch.n_seq_id[at] = 1;
+                batch.seq_id[at][0] = (llama_seq_id)k;
+                batch.logits[at] = 1;
+            }
         }
-        batch.n_tokens = nt;
-        free(toks);
+        batch.n_tokens = at;
         int dec = llama_model_has_encoder(m->model) ? llama_encode(m->emb_ctx, batch)
                                                     : llama_decode(m->emb_ctx, batch);
         llama_batch_free(batch);
-        if (dec != 0) return LM_ERUNTIME;
-
-        const float* e = llama_get_embeddings_seq(m->emb_ctx, 0);
-        if (e == NULL) return LM_ERUNTIME;
-
-        float* dst = out + i * dim;
-        double norm = 0.0;
-        for (int64_t j = 0; j < dim; j++) {
-            dst[j] = e[j];
-            norm += (double)e[j] * e[j];
+        if (dec != 0) {
+            rc = LM_ERUNTIME;
+            break;
         }
-        float inv = norm > 0 ? (float)(1.0 / sqrt(norm)) : 0.0f;
-        for (int64_t j = 0; j < dim; j++) dst[j] *= inv;
+
+        for (int64_t k = 0; k < count; k++) {
+            const float* e = llama_get_embeddings_seq(m->emb_ctx, (llama_seq_id)k);
+            if (e == NULL) {
+                rc = LM_ERUNTIME;
+                break;
+            }
+            float* dst = out + (first + k) * dim;
+            double norm = 0.0;
+            for (int64_t j = 0; j < dim; j++) {
+                dst[j] = e[j];
+                norm += (double)e[j] * e[j];
+            }
+            float inv = norm > 0 ? (float)(1.0 / sqrt(norm)) : 0.0f;
+            for (int64_t j = 0; j < dim; j++) dst[j] *= inv;
+        }
+        first += count;
     }
+
+    for (int64_t i = 0; i < n; i++) free(toks[i]);
+    free(toks);
+    free(lens);
     return rc;
 }

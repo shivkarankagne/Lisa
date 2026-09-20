@@ -23,6 +23,24 @@
 
 <div id="banner" class="banner" role="alert" hidden></div>
 
+<section class="setup card" id="setup" hidden aria-labelledby="setup-heading">
+  <h2 id="setup-heading">Which folders should LISA keep ready?</h2>
+  <p class="help">LISA indexes these while it is open, so you can just ask. Your files stay where
+    they are and nothing leaves this computer.</p>
+  <ul id="setup-folders" class="folders"></ul>
+  <div class="row">
+    <input id="setup-extra" placeholder="/Users/you/another/folder" autocomplete="off"
+           spellcheck="false" aria-label="Another folder to watch">
+    <button type="button" id="setup-browse" class="secondary" hidden>Choose…</button>
+    <button type="button" id="setup-add" class="secondary">Add</button>
+  </div>
+  <div class="row setup-actions">
+    <button type="button" id="setup-go">Start</button>
+    <button type="button" id="setup-skip" class="ghost">Not now</button>
+  </div>
+  <p id="setup-msg" class="help" role="status" aria-live="polite"></p>
+</section>
+
 <div class="layout" id="view-ask">
   <aside class="side" aria-labelledby="coll-heading">
     <h2 id="coll-heading">Collections</h2>

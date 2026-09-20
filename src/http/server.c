@@ -25,6 +25,7 @@ static const char* const k_job_state[] = { "queued", "running", "succeeded", "fa
 
 typedef struct {
     int64_t              id;
+    int                  watched;   /* queued by the folder watcher, not by a request */
     char                 name[APP_NAME_MAX + 1];
     char**               paths;
     int64_t              n_paths;
@@ -57,6 +58,7 @@ struct lisa_server {
     int64_t            n_jobs, cap_jobs, next_id;
     lisa_thread_t*     worker;
     lisa_model_t*      ingest_embed;     /* worker's own embedding model */
+    volatile int       watch_now;        /* set when the watched folders change */
     const server_asset_t* assets;
     int                n_assets;
     volatile int       stop;
@@ -397,6 +399,19 @@ static int h_ingest(lisa_server_t* s, struct mg_connection* conn, const char* na
     return send_doc(conn, 202, out);
 }
 
+/* The most recent jobs, newest first (GET /v1/jobs). */
+static int h_jobs(lisa_server_t* s, struct mg_connection* conn) {
+    yyjson_mut_doc* out = yyjson_mut_doc_new(NULL);
+    yyjson_mut_val* root = yyjson_mut_obj(out);
+    yyjson_mut_doc_set_root(out, root);
+    yyjson_mut_val* arr = yyjson_mut_obj_add_arr(out, root, "jobs");
+    lisa_mutex_lock(s->jobs_mu);
+    for (int64_t i = s->n_jobs - 1; i >= 0 && s->n_jobs - i <= 20; i--)
+        job_json(out, yyjson_mut_arr_add_obj(out, arr), s->jobs[i]);
+    lisa_mutex_unlock(s->jobs_mu);
+    return send_doc(conn, 200, out);
+}
+
 static int h_job(lisa_server_t* s, struct mg_connection* conn, const char* id_text) {
     char* end = NULL;
     long long id = strtoll(id_text, &end, 10);
@@ -605,6 +620,21 @@ static int h_settings_get(lisa_server_t* s, struct mg_connection* conn) {
     yyjson_mut_val* m = yyjson_mut_obj_add_obj(doc, root, "models");
     model_json(s, doc, yyjson_mut_obj_add_obj(doc, m, "chat"), APP_MODEL_CHAT, s->chat != NULL);
     model_json(s, doc, yyjson_mut_obj_add_obj(doc, m, "embedding"), APP_MODEL_EMBEDDING, s->embed != NULL);
+
+    /* Watched folders, and what a new user should be offered. */
+    yyjson_mut_val* w = yyjson_mut_obj_add_obj(doc, root, "watch");
+    if (s->app->watch.collection) yyjson_mut_obj_add_strcpy(doc, w, "collection", s->app->watch.collection);
+    else yyjson_mut_obj_add_null(doc, w, "collection");
+    yyjson_mut_val* fs = yyjson_mut_obj_add_arr(doc, w, "folders");
+    for (int i = 0; i < s->app->watch.n_folders; i++)
+        yyjson_mut_arr_add_strcpy(doc, fs, s->app->watch.folders[i]);
+    yyjson_mut_val* sug = yyjson_mut_obj_add_arr(doc, w, "suggested");
+    char* def[8];
+    int nd = app_default_watch_folders(def, 8);
+    for (int i = 0; i < nd; i++) {
+        yyjson_mut_arr_add_strcpy(doc, sug, def[i]);
+        free(def[i]);
+    }
     return send_doc(conn, 200, doc);
 }
 
@@ -633,7 +663,8 @@ static int h_settings_post(lisa_server_t* s, struct mg_connection* conn) {
     yyjson_val* root = yyjson_doc_get_root(doc);
     static const char* const keys[2] = { "chat_model", "embedding_model" };
     const char* bad = NULL;
-    int changed = 0;
+    int changed = 0;          /* model changes: they need a restart */
+    int watch_changed = 0;    /* watched folders: applied immediately */
     for (int k = 0; k < 2 && bad == NULL; k++) {
         yyjson_val* v = yyjson_obj_get(root, keys[k]);
         if (v == NULL) continue;
@@ -648,13 +679,43 @@ static int h_settings_post(lisa_server_t* s, struct mg_connection* conn) {
             bad = "cannot write config.json";
         else changed++;
     }
+    /* Which folders to keep indexed while LISA runs. */
+    yyjson_val* watch = yyjson_obj_get(root, "watch");
+    if (bad == NULL && yyjson_is_obj(watch)) {
+        const char* coll = yyjson_get_str(yyjson_obj_get(watch, "collection"));
+        yyjson_val* folders = yyjson_obj_get(watch, "folders");
+        const char* paths[APP_MAX_WATCHED];
+        int n = 0;
+        size_t idx, max;
+        yyjson_val* v;
+        yyjson_arr_foreach(folders, idx, max, v) {
+            const char* f = yyjson_get_str(v);
+            if (f == NULL || f[0] != '/') bad = "each watched folder must be an absolute path";
+            else if (n < APP_MAX_WATCHED) paths[n++] = f;
+            if (bad) break;
+        }
+        if (bad == NULL && n > 0 && (coll == NULL || !app_valid_name(coll)))
+            bad = "\"watch.collection\" must be a name of 1-64 of [A-Za-z0-9_-]";
+        if (bad == NULL) {
+            int wrc = app_set_watch(s->app, coll, paths, n);
+            if (wrc == LISA_E_NOT_FOUND) bad = "a watched folder does not exist";
+            else if (wrc != LISA_OK) bad = "cannot save the watched folders";
+            else {
+                watch_changed = 1;      /* takes effect now, no restart */
+                s->watch_now = 1;
+            }
+        }
+    }
     yyjson_doc_free(doc);
     if (bad) return send_error(conn, 400, "invalid_argument", bad);
-    if (changed == 0) return send_error(conn, 400, "invalid_argument", "give chat_model and/or embedding_model");
+    if (changed == 0 && !watch_changed)
+        return send_error(conn, 400, "invalid_argument",
+                          "give chat_model, embedding_model and/or watch");
     yyjson_mut_doc* out = yyjson_mut_doc_new(NULL);
     yyjson_mut_val* oroot = yyjson_mut_obj(out);
     yyjson_mut_doc_set_root(out, oroot);
-    yyjson_mut_obj_add_bool(out, oroot, "restart_required", true);
+    yyjson_mut_obj_add_bool(out, oroot, "restart_required", changed > 0);   /* models only */
+    yyjson_mut_obj_add_bool(out, oroot, "watching", s->app->watch.collection != NULL);
     return send_doc(conn, 200, out);
 }
 
@@ -767,6 +828,9 @@ static int route(struct mg_connection* conn, void* cbdata) {
     } else if (strcmp(path, "/v1/collections") == 0) {
         result = strcmp(method, "GET") == 0 ? h_collections(s, conn)
                                             : send_error(conn, 405, "method_not_allowed", "use GET");
+    } else if (strcmp(path, "/v1/jobs") == 0) {
+        result = strcmp(method, "GET") == 0 ? h_jobs(s, conn)
+                                            : send_error(conn, 405, "method_not_allowed", "use GET");
     } else if (strncmp(path, "/v1/jobs/", 9) == 0) {
         result = strcmp(method, "GET") == 0 ? h_job(s, conn, path + 9)
                                             : send_error(conn, 405, "method_not_allowed", "use GET");
@@ -840,7 +904,9 @@ static void run_job(lisa_server_t* s, job_t* j) {
     job_state_t final = st.state == LISA_JOB_SUCCEEDED ? JOB_SUCCEEDED
                       : st.state == LISA_JOB_CANCELLED ? JOB_CANCELLED : JOB_FAILED;
     set_job(s, j, final, &st, final == JOB_FAILED ? lisa_status_string(st.status) : NULL);
-    log_write(final == JOB_FAILED ? LOG_WARN : LOG_INFO,
+    int quiet = j->watched && final == JOB_SUCCEEDED && st.files_added == 0 &&
+                st.files_updated == 0 && st.files_removed == 0 && st.files_failed == 0;
+    log_write(final == JOB_FAILED ? LOG_WARN : quiet ? LOG_DEBUG : LOG_INFO,
               "ingest job %lld (%s): %s, %lld files seen, %lld added, %lld updated, %lld unchanged, "
               "%lld without text, %lld failed, %lld chunks in %.1f s",
               (long long)j->id, j->name, k_job_state[final], (long long)st.files_seen,
@@ -849,9 +915,69 @@ static void run_job(lisa_server_t* s, job_t* j) {
               st.elapsed_seconds);
 }
 
+/*
+ * Watched folders (app.h): while LISA runs, re-index them every
+ * WATCH_INTERVAL_MS. Indexing skips files whose size and time are
+ * unchanged, so a pass over unchanged folders costs one stat per file.
+ * Nothing runs once LISA is closed.
+ */
+#define WATCH_INTERVAL_MS 60000
+
+static void queue_watch_pass(lisa_server_t* s) {
+    const app_watch_t* w = &s->app->watch;
+    if (w->collection == NULL || w->n_folders == 0) return;
+    job_t* j = (job_t*)calloc(1, sizeof(job_t));
+    if (j) j->paths = (char**)calloc((size_t)w->n_folders, sizeof(char*));
+    if (j == NULL || j->paths == NULL) {
+        job_free(j);
+        return;
+    }
+    snprintf(j->name, sizeof(j->name), "%s", w->collection);
+    j->st.struct_size = sizeof(j->st);
+    j->watched = 1;
+    for (int i = 0; i < w->n_folders; i++) {
+        if (!lisa_path_is_dir(w->folders[i])) continue;   /* folder went away: skip it */
+        j->paths[j->n_paths] = strdup(w->folders[i]);
+        if (j->paths[j->n_paths] == NULL) break;
+        j->n_paths++;
+    }
+    if (j->n_paths == 0) {
+        job_free(j);
+        return;
+    }
+    lisa_mutex_lock(s->jobs_mu);
+    int room = s->n_jobs < s->cap_jobs;
+    if (!room) {
+        int64_t cap = s->cap_jobs ? s->cap_jobs * 2 : 16;
+        job_t** g = (job_t**)realloc(s->jobs, (size_t)cap * sizeof(job_t*));
+        if (g) {
+            s->jobs = g;
+            s->cap_jobs = cap;
+            room = 1;
+        }
+    }
+    if (room) {
+        j->id = ++s->next_id;
+        j->state = JOB_QUEUED;
+        s->jobs[s->n_jobs++] = j;
+    }
+    lisa_mutex_unlock(s->jobs_mu);
+    if (!room) job_free(j);
+}
+
 static void worker(void* arg) {
     lisa_server_t* s = (lisa_server_t*)arg;
+    int64_t next_watch = 0;   /* 0: run a pass as soon as the server starts */
     while (!s->stop) {
+        int64_t now = lisa_time_monotonic_ns() / 1000000;
+        if (s->watch_now) {
+            s->watch_now = 0;
+            next_watch = 0;
+        }
+        if (s->embed && now >= next_watch) {
+            queue_watch_pass(s);
+            next_watch = now + WATCH_INTERVAL_MS;
+        }
         job_t* next = NULL;
         lisa_mutex_lock(s->jobs_mu);
         for (int64_t i = 0; i < s->n_jobs && next == NULL; i++) {

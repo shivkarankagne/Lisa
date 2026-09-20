@@ -424,6 +424,104 @@ $("question").addEventListener("keydown", (ev) => {
   }
 });
 
+// ---- first run: which folders to keep indexed -----------------------------------------
+const WATCH_COLLECTION = "my-documents";
+let setupFolders = [];   // { path, checked }
+
+function renderSetupFolders() {
+  const ul = $("setup-folders");
+  ul.replaceChildren();
+  setupFolders.forEach((f, i) => {
+    const li = document.createElement("li");
+    const box = document.createElement("input");
+    box.type = "checkbox";
+    box.checked = f.checked;
+    box.id = "wf" + i;
+    box.addEventListener("change", () => { f.checked = box.checked; });
+    const label = document.createElement("label");
+    label.htmlFor = box.id;
+    label.textContent = f.path;
+    li.append(box, label);
+    ul.append(li);
+  });
+}
+
+function addSetupFolder(path) {
+  path = (path || "").trim();
+  if (!path.startsWith("/")) {
+    $("setup-msg").textContent = "Give the full path of a folder, starting with /.";
+    return;
+  }
+  if (!setupFolders.some((f) => f.path === path)) setupFolders.push({ path, checked: true });
+  $("setup-extra").value = "";
+  $("setup-msg").textContent = "";
+  renderSetupFolders();
+}
+
+$("setup-add").addEventListener("click", () => addSetupFolder($("setup-extra").value));
+$("setup-extra").addEventListener("keydown", (ev) => {
+  if (ev.key === "Enter") { ev.preventDefault(); addSetupFolder($("setup-extra").value); }
+});
+if (typeof window.lisaChooseFolder === "function") {
+  const b = $("setup-browse");
+  b.hidden = false;
+  b.addEventListener("click", async () => {
+    const p = await window.lisaChooseFolder();
+    if (p) addSetupFolder(p);
+  });
+}
+$("setup-skip").addEventListener("click", () => {
+  $("setup").hidden = true;
+  showView("ask");
+});
+$("setup-go").addEventListener("click", async () => {
+  const chosen = setupFolders.filter((f) => f.checked).map((f) => f.path);
+  if (chosen.length === 0) {
+    $("setup-msg").textContent = "Tick at least one folder, or choose Not now.";
+    return;
+  }
+  $("setup-go").disabled = true;
+  $("setup-msg").textContent = "Starting\u2026";
+  try {
+    await api("POST", "/v1/settings", { watch: { collection: WATCH_COLLECTION, folders: chosen } });
+    $("setup").hidden = true;
+    showView("ask");
+    $("job").hidden = false;
+    $("job-bar").removeAttribute("value");
+    $("job-text").textContent = "Reading your folders\u2026 you can ask questions as they arrive.";
+    watchProgress();
+    await loadCollections(WATCH_COLLECTION);
+  } catch (e) {
+    $("setup-msg").textContent = friendly(e);
+  } finally {
+    $("setup-go").disabled = false;
+  }
+});
+
+/* While the watcher indexes, show what it has done and refresh the list. */
+async function watchProgress() {
+  for (let i = 0; i < 600; i++) {
+    await new Promise((r) => setTimeout(r, 2000));
+    let list;
+    try {
+      list = await api("GET", "/v1/jobs");
+    } catch (_) {
+      return;
+    }
+    const j = (list.jobs || [])[0];
+    if (!j) return;
+    if (j.state === "running" || j.state === "queued") {
+      $("job-text").textContent = "Indexing: " + jobText(j);
+    } else {
+      $("job-text").textContent = "Ready: " + jobText(j);
+      $("job-bar").value = 1;
+      $("job-bar").max = 1;
+      await loadCollections(current || WATCH_COLLECTION);
+      return;
+    }
+  }
+}
+
 // ---- settings -----------------------------------------------------------------------
 function modelStatus(m) {
   if (!m.path) return "No file found. Enter the path of a model file.";
@@ -469,6 +567,17 @@ async function start() {
       showBanner("A model is missing, so asking questions will not work yet. Open Settings to choose model files.");
     }
     await loadCollections();
+
+    /* Nothing watched and nothing indexed yet: offer the folders once. */
+    const s = await api("GET", "/v1/settings");
+    if (!s.watch.collection && collections.length === 0) {
+      setupFolders = (s.watch.suggested || []).map((path) => ({ path, checked: true }));
+      renderSetupFolders();
+      $("setup").hidden = false;
+      $("view-ask").hidden = true;
+    } else if (s.watch.collection) {
+      watchProgress();
+    }
   } catch (e) {
     showBanner(friendly(e));
   }

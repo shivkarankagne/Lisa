@@ -15,9 +15,10 @@ static const char k_system[] =
     "You answer questions using only the numbered passages from the user's documents.\n"
     "Rules:\n"
     "- Use only facts stated in the passages. Never use outside knowledge.\n"
+    "- A passage's heading names the document it came from; use it to connect the question to the "
+    "passage, and do not refuse because a passage omits a name the question uses.\n"
+    "- If passages disagree, give each answer with its own citation and say they differ.\n"
     "- After each fact, cite its passage number in square brackets, like [1].\n"
-    "- If passages disagree (for example two versions of a document), give each answer with its own citation "
-    "and say that they differ.\n"
     "- If the passages do not contain the answer, reply exactly: " CTX_NOT_FOUND_TEXT "\n"
     "- Answer briefly, in the language of the question.";
 

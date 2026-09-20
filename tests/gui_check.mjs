@@ -107,6 +107,18 @@ await send("Page.enable");
 try {
   // ---- load --------------------------------------------------------------------------
   await send("Page.navigate", { url });
+  /* A fresh data directory shows the first-run folder panel. */
+  check("first run offers folders to watch", await waitFor("!document.getElementById('setup').hidden", 10000));
+  check("suggested folders listed",
+        (await js("document.querySelectorAll('#setup-folders li').length")) > 0);
+  await js(`document.getElementById('setup-extra').value = ${JSON.stringify(docsDir)};
+            document.getElementById('setup-add').click(); true`);
+  check("another folder can be added",
+        await js(`[...document.querySelectorAll('#setup-folders label')].some(l => l.textContent === ${JSON.stringify(docsDir)})`));
+  await js("document.getElementById('setup-skip').click(); true");
+  check("\"Not now\" goes to the ask view",
+        await waitFor("document.getElementById('setup').hidden && !document.getElementById('view-ask').hidden", 3000));
+
   check("page loads and shows collections",
         await waitFor("document.querySelectorAll('#collections li').length > 0 || !document.getElementById('coll-empty').hidden", 10000));
   check("token removed from the address bar", (await js("location.hash")) === "");

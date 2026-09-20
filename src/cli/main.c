@@ -388,6 +388,8 @@ static int cmd_ask(app_t* app, const args_t* a) {
         lisa_message_t m = { "user", a->pos[0] };
         rc = lisa_ask(c, embed, chat, &m, 1, &o, &ans);
         if (rc == LISA_E_MODEL_MISMATCH) err = "the collection was built with a different embedding model";
+        else if (rc == LISA_E_INTERNAL)
+            err = "the model produced nothing; another AI app may be holding the GPU (close it and retry)";
     }
     if (rc == LISA_OK && a->json) {
         yyjson_mut_doc* doc = yyjson_mut_doc_new(NULL);

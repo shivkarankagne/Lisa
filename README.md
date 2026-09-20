@@ -55,8 +55,10 @@ read with text recognition):
 
     lisa gui
 
-Drop a folder on it, type your question, click a citation to read the
-passage it came from.
+The first time, it asks which folders to keep ready — Documents, Desktop
+and Downloads are offered, and you can add any other. From then on LISA
+keeps them indexed while it is open: new and changed files are picked up
+within a minute, so you just ask. Nothing runs when LISA is closed.
 
 ---
 
@@ -68,8 +70,9 @@ passage it came from.
   part numbers work as well as questions in plain language.
 - **Answers** with citations: file, page, and the quoted passage. If your
   documents do not contain the answer, it says so instead of guessing.
-- **Keeps up to date**: re-running `ingest` re-reads only changed files
-  and drops files you deleted.
+- **Keeps up to date by itself**: the folders you chose are re-checked
+  while LISA is open, and only new or changed files are read. On the
+  command line, `lisa ingest` does the same on demand.
 - **Works offline**, always. Turn off Wi-Fi and nothing changes.
 - **Speaks many languages**, including Hindi and other Indian languages
   in text documents.
@@ -80,7 +83,7 @@ and a local HTTP API (`docs/http-api.md`) for your own scripts.
 ## Where your data lives
 
     ~/Library/Application Support/LISA/
-      config.json            which model files to use
+      config.json            which model files to use, and which folders to keep indexed
       collections/<name>/    the index for one set of documents
       lisa.log               what LISA did (never your document text)
 

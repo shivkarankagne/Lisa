@@ -45,7 +45,11 @@ against the known models).
 - **ask** streams an answer from the collection with numbered citations,
   then lists the sources. If the documents do not contain the answer it
   says "I could not find this in your documents."
-- **gui** opens LISA in its own window (macOS; `--browser` or other
+- **gui** opens LISA in its own window, and on first run asks which
+  folders to keep indexed. While the window (or `lisa serve`) is open,
+  those folders are re-checked at start, when the choice changes, and
+  every minute; only new or changed files are read. Nothing runs when
+  LISA is closed. The choice lives in `config.json` under `watch` (macOS; `--browser` or other
   systems: the default browser). Add folders (type a path, "Choose…",
   or drop a folder on the window), ask, click a citation to read the
   passage, change models in Settings. Close the window to quit.

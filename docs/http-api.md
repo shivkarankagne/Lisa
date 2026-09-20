@@ -75,6 +75,11 @@ search and ask keep working.
 
     {"job": {"id": "1", "collection": "plant", "state": "queued", "files_seen": 0, ...}}
 
+### `GET /v1/jobs`  (since 0.6)
+
+The last 20 jobs, newest first: `{"jobs": [ {...}, ... ]}`, each the same
+object as below.
+
 ### `GET /v1/jobs/{id}`
 
     {"job": {"id": "1", "collection": "plant", "state": "succeeded",

@@ -9,7 +9,7 @@
  *
  * Data directory layout:
  *
- *     <data>/config.json            {"version": 1, "models": {"chat": "...", "embedding": "..."}}
+ *     <data>/config.json            {"version": 1, "models": {...}, "watch": {...}}
  *     <data>/collections/<name>/    one collection per name
  *     <data>/models/                a place to put model files (searched)
  *
@@ -24,8 +24,20 @@
 
 #define APP_CONFIG_VERSION 1
 #define APP_NAME_MAX       64
+#define APP_MAX_WATCHED    16
 
 typedef enum { APP_MODEL_CHAT = 0, APP_MODEL_EMBEDDING = 1 } app_model_kind;
+
+/*
+ * The folders LISA keeps indexed while it is running, and the collection
+ * they go into ("watch" in config.json). Chosen once, in the GUI's first
+ * run or with `lisa watch --add`.
+ */
+typedef struct {
+    char*   collection;                 /* NULL: nothing watched yet */
+    char*   folders[APP_MAX_WATCHED];
+    int     n_folders;
+} app_watch_t;
 
 typedef struct {
     lisa_context_t* ctx;              /* owned */
@@ -33,6 +45,7 @@ typedef struct {
     char*           collections_dir;
     char*           config_path;
     char*           config_model[2];  /* from config.json; NULL if unset */
+    app_watch_t     watch;
 } app_t;
 
 /*
@@ -61,6 +74,17 @@ char* app_find_model(const app_t* app, app_model_kind kind, const char** source)
 
 /* Record path as the model of this kind in config.json (atomic write). */
 int app_set_model(app_t* app, app_model_kind kind, const char* path);
+
+/*
+ * Replace the watched folders (absolute paths that exist) and the
+ * collection they are indexed into, and save config.json. count 0 stops
+ * watching.
+ */
+int app_set_watch(app_t* app, const char* collection, const char* const* folders, int count);
+
+/* The folders a new user should be offered: Documents, Desktop, Downloads
+ * that exist. Fills up to `cap` malloc'd paths; returns how many. */
+int app_default_watch_folders(char** out, int cap);
 
 /* Find and load the model of this kind. *err explains a failure. */
 int app_load_model(const app_t* app, app_model_kind kind, lisa_model_t** out, const char** err);
