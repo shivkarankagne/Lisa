@@ -166,6 +166,16 @@ static void test_not_found(void) {
 
     o = (lisa_ask_options_t)LISA_ASK_OPTIONS_INIT;
     o.max_tokens = 64;
+    /*
+     * A fact the model is sure of, with passages that pass the floor: it
+     * must still decline rather than answer from its own knowledge and
+     * hang a citation on an unrelated passage.
+     */
+    TEST_ASSERT_EQUAL_INT(LISA_OK, ask("What is the capital of France?", &o, &a));
+    TEST_ASSERT_FALSE(a->found);
+    TEST_ASSERT_EQUAL_INT64(0, a->citation_count);
+    lisa_answer_free(a);
+
     /* On topic, but the fact is missing: the model declines. */
     TEST_ASSERT_EQUAL_INT(LISA_OK, ask("What is our parental leave policy?", &o, &a));
     TEST_ASSERT_TRUE(a->passages_used > 0);

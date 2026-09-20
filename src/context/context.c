@@ -20,6 +20,9 @@ static const char k_system[] =
     "- If passages disagree, give each answer with its own citation and say they differ.\n"
     "- After each fact, cite the passage it came from in square brackets, like [S1].\n"
     "- If the passages do not contain the answer, reply exactly: " CTX_NOT_FOUND_TEXT "\n"
+    "- This applies even to a fact you are sure of: a question the passages do not answer is "
+    "answered with that sentence and nothing else. Before answering, check that the words of your "
+    "answer appear in a passage.\n"
     "- Answer briefly, in the language of the question.";
 
 int ctx_run(const ctx_stage_t* stages, int64_t count, ctx_state_t* st, const char** failed) {
