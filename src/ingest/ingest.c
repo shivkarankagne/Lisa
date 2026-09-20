@@ -13,6 +13,8 @@
 #include "../platform/platform.h"
 
 #define DEFAULT_EMBED_BATCH 16
+#define EMBED_ATTEMPTS      3      /* a busy GPU is a moment, not a verdict */
+#define EMBED_RETRY_MS      400
 #define HASH_CHUNK (1 << 20)
 
 typedef struct {
@@ -23,6 +25,8 @@ typedef struct {
     int                    cancelled;
     char**                 seen;       /* absolute paths visited (for removals) */
     int64_t                n_seen, cap_seen;
+    const char*            walk_root;  /* folder being walked; NULL for a named file */
+    int                    recipe_changed;  /* collection was embedded by an older LISA */
 } run_t;
 
 /* ---- helpers ---------------------------------------------------------- */
@@ -137,8 +141,16 @@ static int index_file(run_t* r, const char* path, const lisa_file_info_t* info) 
     lisa_store_doc_t old;
     int existed = lisa_store_doc_get(p->store, path, &old) == LISA_STORE_OK;
 
+    /*
+     * A document that failed before is always read again: the cause is
+     * usually temporary (a busy GPU, a locked file), and a collection
+     * that quietly leaves documents out gives wrong "not found" answers.
+     */
+    int failed_before = existed && old.status && strcmp(old.status, "error") == 0;
+    if (r->recipe_changed) failed_before = 1;   /* rebuild: vectors were made differently */
+
     /* Fast path: size and mtime unchanged -> not even read. */
-    if (existed && old.size == info->size && old.mtime_ns == info->mtime_ns) {
+    if (existed && !failed_before && old.size == info->size && old.mtime_ns == info->mtime_ns) {
         lisa_store_doc_free(&old);
         r->prog.files_unchanged++;
         return LISA_STORE_OK;
@@ -150,7 +162,7 @@ static int index_file(run_t* r, const char* path, const lisa_file_info_t* info) 
         r->prog.files_failed++;
         return record_empty(r, path, NULL, info, NULL, "error", "cannot read file", existed);
     }
-    if (existed && strcmp(hash, old.content_hash) == 0) {
+    if (existed && !failed_before && strcmp(hash, old.content_hash) == 0) {
         /* Touched but identical: remember the new size/mtime only. */
         lisa_store_doc_free(&old);
         free(hash);
@@ -183,25 +195,23 @@ static int index_file(run_t* r, const char* path, const lisa_file_info_t* info) 
         return rc;
     }
 
-    /* Chunk texts (stored) and embedding inputs (label + text). */
-    const char* base = strrchr(path, lisa_path_sep());
-    const char* label = (t.title && t.title[0]) ? t.title : (base ? base + 1 : path);
-    size_t label_len = strlen(label);
+    /*
+     * Chunk texts. The embedded text is the passage alone: prefixing the
+     * document title made short front-matter chunks (title page,
+     * acknowledgements) the closest match for any question that repeated
+     * the title or the author's name, because the title was most of their
+     * vector. The title still reaches search through the keyword index.
+     */
     char** texts = (char**)calloc((size_t)n, sizeof(char*));
-    char** inputs = (char**)calloc((size_t)n, sizeof(char*));
     float* vectors = (float*)malloc((size_t)(n * r->dim) * sizeof(float));
     lisa_store_chunk_t* chunks = (lisa_store_chunk_t*)calloc((size_t)n, sizeof(lisa_store_chunk_t));
-    int rc = (texts && inputs && vectors && chunks) ? LISA_STORE_OK : LISA_STORE_ENOMEM;
+    int rc = (texts && vectors && chunks) ? LISA_STORE_OK : LISA_STORE_ENOMEM;
     for (int64_t i = 0; rc == LISA_STORE_OK && i < n; i++) {
         texts[i] = xstrndup(t.text + spans[i].offset, spans[i].length);
-        inputs[i] = (char*)malloc(label_len + 2 + (size_t)spans[i].length + 1);
-        if (texts[i] == NULL || inputs[i] == NULL) {
+        if (texts[i] == NULL) {
             rc = LISA_STORE_ENOMEM;
             break;
         }
-        memcpy(inputs[i], label, label_len);
-        memcpy(inputs[i] + label_len, "\n\n", 2);
-        memcpy(inputs[i] + label_len + 2, texts[i], (size_t)spans[i].length + 1);
         chunks[i].doc_id = (char*)path;
         chunks[i].chunk_index = i;
         chunks[i].source_path = (char*)path;
@@ -216,13 +226,29 @@ static int index_file(run_t* r, const char* path, const lisa_file_info_t* info) 
     int64_t batch = p->embed_batch > 0 ? p->embed_batch : DEFAULT_EMBED_BATCH;
     for (int64_t i = 0; rc == LISA_STORE_OK && !embed_failed && i < n; i += batch) {
         int64_t m = n - i < batch ? n - i : batch;
-        if (p->embed(p->embed_user, (const char* const*)(inputs + i), m, vectors + i * r->dim, r->dim) != 0)
+        /*
+         * Embedding can fail for a moment rather than for good: the GPU
+         * may be busy with another program. Try again before giving up,
+         * and record such a file so the next pass retries it.
+         */
+        for (int attempt = 0; attempt < EMBED_ATTEMPTS; attempt++) {
+            if (p->embed(p->embed_user, (const char* const*)(texts + i), m,
+                         vectors + i * r->dim, r->dim) == 0) {
+                embed_failed = 0;
+                break;
+            }
             embed_failed = 1;
+            if (attempt + 1 < EMBED_ATTEMPTS) lisa_sleep_ms(EMBED_RETRY_MS << attempt);
+        }
     }
 
     if (rc == LISA_STORE_OK && embed_failed) {
         r->prog.files_failed++;
-        rc = record_empty(r, path, hash, info, t.title, "error", "embedding failed", existed);
+        /* mtime 0: the file looks changed next time, so it is read again. */
+        lisa_file_info_t retry = *info;
+        retry.mtime_ns = 0;
+        rc = record_empty(r, path, "", &retry, t.title,
+                          "error", "could not be indexed (the model was busy); will try again", existed);
     } else if (rc == LISA_STORE_OK) {
         lisa_store_doc_t d;
         memset(&d, 0, sizeof(d));
@@ -245,10 +271,8 @@ static int index_file(run_t* r, const char* path, const lisa_file_info_t* info) 
 
     for (int64_t i = 0; i < n; i++) {
         if (texts) free(texts[i]);
-        if (inputs) free(inputs[i]);
     }
     free(texts);
-    free(inputs);
     free(vectors);
     free(chunks);
     free(spans);
@@ -267,9 +291,53 @@ static int report(run_t* r, const char* path) {
     return keep_going;
 }
 
+/*
+ * Folders that hold software, not documents. Indexing them fills a
+ * collection with package metadata and READMEs, and near-empty files
+ * ("yarl" in a top_level.txt) produce vectors that match any question.
+ * Short files elsewhere are kept: a one-line note is a real document.
+ * A path given directly by the user is always indexed; these names are
+ * only skipped when met while walking into a folder.
+ */
+static const char* const k_skip_dirs[] = {
+    "node_modules", "site-packages", "dist-packages", "__pycache__", ".venv",
+    "Pods", ".gradle", ".cargo", ".git", ".svn", NULL,
+    /* Names like build, dist, target or vendor are left alone: they are as
+     * likely to be someone's folder of documents as a folder of software. */
+};
+
+static int in_skipped_dir(const char* path, const char* root) {
+    size_t root_len = root ? strlen(root) : 0;
+    const char* p = path + (root_len && strncmp(path, root, root_len) == 0 ? root_len : 0);
+    for (const char* seg = p; seg && *seg; ) {
+        const char* end = strchr(seg + 1, '/');
+        if (end == NULL) break;
+        size_t len = (size_t)(end - seg) - (*seg == '/' ? 1 : 0);
+        const char* name = seg + (*seg == '/' ? 1 : 0);
+        for (const char* const* d = k_skip_dirs; *d; d++) {
+            if (strlen(*d) == len && strncmp(name, *d, len) == 0) return 1;
+        }
+        seg = end;
+    }
+    return 0;
+}
+
+/*
+ * How the text handed to the embedding model is prepared. Raising this
+ * makes the next run re-read every document, because vectors made with
+ * an older recipe cannot be compared with new ones.
+ *   1: document title, a blank line, then the passage
+ *   2: the passage alone (a short passage was otherwise mostly title)
+ */
+#define EMBED_RECIPE 2
+
 static int visit(void* user, const char* path, const lisa_file_info_t* info) {
     run_t* r = (run_t*)user;
     if (doc_find_extractor(path) == NULL) {
+        r->prog.files_skipped++;
+        return 0;
+    }
+    if (in_skipped_dir(path, r->walk_root)) {
         r->prog.files_skipped++;
         return 0;
     }
@@ -372,6 +440,8 @@ int ingest_run(const ingest_params_t* p, const char* const* paths, int64_t n_pat
     memset(&r, 0, sizeof(r));
     r.p = p;
     r.dim = lisa_store_dim(p->store);
+    /* Vectors from an older recipe cannot be compared with new ones. */
+    r.recipe_changed = lisa_store_get_user_version(p->store) != EMBED_RECIPE;
     int rc = INGEST_OK;
 
     /* 1. Index files. */
@@ -379,7 +449,9 @@ int ingest_run(const ingest_params_t* p, const char* const* paths, int64_t n_pat
         lisa_file_info_t info;
         lisa_file_info(paths[i], &info);
         if (info.is_dir) {
+            r.walk_root = paths[i];
             int wrc = lisa_dir_walk(paths[i], p->include_hidden, visit, &r);
+            r.walk_root = NULL;
             if (r.cancelled) rc = INGEST_ECANCELLED;
             else if (r.store_rc != LISA_STORE_OK) rc = INGEST_ESTORE;
             else if (wrc < 0 && wrc != LISA_PLAT_OK) rc = wrc == LISA_PLAT_ENOMEM ? INGEST_ENOMEM : INGEST_ESTORE;
@@ -402,6 +474,10 @@ int ingest_run(const ingest_params_t* p, const char* const* paths, int64_t n_pat
         rc = remove_missing(&r, abs);
         free(abs);
     }
+
+    /* A finished run leaves every vector made the same way. */
+    if (rc == INGEST_OK && r.recipe_changed && !r.cancelled)
+        lisa_store_set_user_version(p->store, EMBED_RECIPE);
 
     for (int64_t i = 0; i < r.n_seen; i++) free(r.seen[i]);
     free(r.seen);

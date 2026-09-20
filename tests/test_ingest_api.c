@@ -171,9 +171,10 @@ static void test_blocking_ingest_and_search(void) {
     TEST_ASSERT_NOT_NULL(strstr(ch->source_path, "leave.md"));
     lisa_chunk_free(ch);
 
-    /* Second run: nothing to do. */
+    /* Second run: nothing to do, except the file that failed before (a
+     * failure is usually temporary, so it is always read again). */
     TEST_ASSERT_EQUAL_INT(LISA_OK, lisa_ingest(c, g_model, paths, 1, NULL, &st));
-    TEST_ASSERT_EQUAL_INT64(4, st.files_unchanged);
+    TEST_ASSERT_EQUAL_INT64(3, st.files_unchanged);
     TEST_ASSERT_EQUAL_INT64(0, st.chunks_added);
     lisa_collection_close(c);
 }
@@ -250,9 +251,11 @@ static void test_cancel(void) {
     TEST_ASSERT_TRUE(st.files_added < 60);
     lisa_ingest_free(job);
 
-    /* Collection consistent and usable; a new run completes the rest. */
+    /* Collection consistent and usable; a new run completes the rest. A
+     * file the cancelled run had recorded as failed is read again, so it
+     * counts as updated rather than added. */
     TEST_ASSERT_EQUAL_INT(LISA_OK, lisa_ingest(w, g_model, paths, 1, NULL, &st));
-    TEST_ASSERT_EQUAL_INT64(60, st.files_added + st.files_unchanged);
+    TEST_ASSERT_EQUAL_INT64(60, st.files_added + st.files_unchanged + st.files_updated);
     lisa_collection_close(w);
 }
 

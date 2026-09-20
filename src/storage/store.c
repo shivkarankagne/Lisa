@@ -591,6 +591,18 @@ const char* lisa_store_model(const lisa_store_t* s) {
     return s ? s->model : NULL;
 }
 
+int64_t lisa_store_get_user_version(lisa_store_t* s) {
+    int64_t v = 0;
+    if (s == NULL || meta_get_int(s->db, "user_version", &v) != LISA_STORE_OK) return 0;
+    return v;
+}
+
+int lisa_store_set_user_version(lisa_store_t* s, int64_t value) {
+    if (s == NULL) return LISA_STORE_EINVAL;
+    if (s->mode != LISA_STORE_WRITE) return LISA_STORE_EREADONLY;
+    return meta_set_int(s->db, "user_version", value);
+}
+
 int64_t lisa_store_dim(const lisa_store_t* s) {
     return s ? s->dim : 0;
 }

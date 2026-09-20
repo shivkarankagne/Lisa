@@ -99,6 +99,15 @@ void lisa_store_close(lisa_store_t* store);
 
 /* Collection properties. Strings are owned by the handle. */
 const char* lisa_store_model(const lisa_store_t* store);
+
+/*
+ * A number the caller keeps in the collection, for its own use: ingest
+ * records how it prepared the text it embedded, so a collection written
+ * by an older LISA can be rebuilt instead of mixing two kinds of vector.
+ * Reading an unset key gives 0.
+ */
+int64_t lisa_store_get_user_version(lisa_store_t* store);
+int     lisa_store_set_user_version(lisa_store_t* store, int64_t value);
 int64_t     lisa_store_dim(const lisa_store_t* store);
 int64_t     lisa_store_count(const lisa_store_t* store);  /* live chunks */
 

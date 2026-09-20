@@ -180,16 +180,19 @@ static void test_rerun_unchanged_does_nothing(void) {
     fake_t f2 = { 0, 0 };
     TEST_ASSERT_EQUAL_INT(INGEST_OK, run(s, &f2, g_root, &r));
     TEST_ASSERT_EQUAL_INT64(0, f2.calls);             /* nothing embedded */
-    TEST_ASSERT_EQUAL_INT64(5, r.files_unchanged);    /* incl. recorded no_text and error files */
+    /* A file recorded as "error" is read again on every run (the cause is
+     * usually temporary), so only the four readable ones count unchanged. */
+    TEST_ASSERT_EQUAL_INT64(4, r.files_unchanged);
     TEST_ASSERT_EQUAL_INT64(0, r.files_added + r.files_updated + r.files_removed);
     TEST_ASSERT_EQUAL_INT64(0, r.chunks_added + r.chunks_removed);
     TEST_ASSERT_EQUAL_INT64(count, lisa_store_count(s));
 
-    /* Touched but identical content: record updated, still nothing embedded. */
+    /* Touched but identical content: record updated, still nothing embedded.
+     * The file that failed before is read again, so four count unchanged. */
     set_mtime("a.txt", 1700000000);
     TEST_ASSERT_EQUAL_INT(INGEST_OK, run(s, &f2, g_root, &r));
     TEST_ASSERT_EQUAL_INT64(0, f2.calls);
-    TEST_ASSERT_EQUAL_INT64(5, r.files_unchanged);
+    TEST_ASSERT_EQUAL_INT64(4, r.files_unchanged);
     lisa_store_doc_t rec;
     TEST_ASSERT_EQUAL_STRING("ok", status_of(s, "a.txt", &rec));
     TEST_ASSERT_EQUAL_INT64(1700000000LL * 1000000000LL, rec.mtime_ns);
@@ -296,7 +299,9 @@ static void test_embed_failure_marks_document(void) {
     TEST_ASSERT_EQUAL_INT64(1, r.files_failed);
     lisa_store_doc_t rec;
     TEST_ASSERT_EQUAL_STRING("error", status_of(s, "poison.txt", &rec));
-    TEST_ASSERT_EQUAL_STRING("embedding failed", rec.message);
+    /* The message says what happened and that LISA will try again: an
+     * embedding failure is usually temporary (a busy GPU). */
+    TEST_ASSERT_NOT_NULL(strstr(rec.message, "will try again"));
     TEST_ASSERT_EQUAL_INT64(0, rec.chunk_count);
     lisa_store_doc_free(&rec);
     lisa_store_close(s);
@@ -339,9 +344,9 @@ static void test_search_finds_ingested_chunk(void) {
     ingest_progress_t r;
     TEST_ASSERT_EQUAL_INT(INGEST_OK, run(s, &f, g_root, &r));
 
-    /* The fake embedding of "<title>\n\n<text>" for b.md's chunk is its own nearest neighbour. */
+    /* The passage is embedded on its own, so its own text finds it. */
     float q[DIM];
-    fake_vec("Leave Policy\n\nLeave Policy\n\nEmployees get 20 days of annual leave.", q, DIM);
+    fake_vec("Leave Policy\n\nEmployees get 20 days of annual leave.", q, DIM);
     lisa_store_view_t v;
     TEST_ASSERT_EQUAL_INT(LISA_STORE_OK, lisa_store_view(s, &v));
     int idx[1];
