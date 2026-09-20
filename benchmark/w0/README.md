@@ -16,10 +16,16 @@ two image-only PDFs that need text recognition.
 
 ## The questions
 
-`questions.json`: 20 questions — 19 answerable, 1 that must be refused.
-Ground truth was read from the documents themselves; `expect` lists the
-strings a correct answer contains, and `source` the document that should
-be cited.
+`questions.json`: 58 questions — 54 answerable, 4 that must be refused,
+which meets the W12 exit criterion of at least 50. Ground truth was read
+from the documents themselves; `expect` lists the strings a correct
+answer contains, and `source` the document that should be cited.
+
+`run_lisa.py` scores four things: whether the answer contains the fact,
+whether it cites the right document, whether retrieval put that document
+in the top 10 at all (recall@10), and whether an unanswerable question
+is refused. Recall is scored separately so that a retrieval fault can be
+told apart from a generation fault.
 
 ## Running
 

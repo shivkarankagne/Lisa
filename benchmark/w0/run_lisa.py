@@ -75,14 +75,56 @@ if not args.skip_ingest:
           f"peak {peak:.0f} MB, index {disk / 1e6:.1f} MB")
 
 # ---- ask -----------------------------------------------------------------------
+def contains_fact(text, expected):
+    """
+    Does `text` state `expected`? Commas and spaces are ignored, because
+    documents write 3,000 and an answer may write 3000. A number must not
+    match inside a longer one: "35" is not present in "1,350", and
+    scoring it as present overstates both recall and accuracy.
+    """
+    t = re.sub(r"[,\s]", "", text.lower())
+    x = re.sub(r"[,\s]", "", expected.lower())
+    if not x:
+        return False
+    i = t.find(x)
+    while i >= 0:
+        before = t[i - 1] if i > 0 else ""
+        after = t[i + len(x)] if i + len(x) < len(t) else ""
+        if not (x[0].isdigit() and before.isdigit()) and not (x[-1].isdigit() and after.isdigit()):
+            return True
+        i = t.find(x, i + 1)
+    return False
+
+
 ok_answer = ok_citation = ok_refusal = 0
+ok_recall_file = ok_recall_passage = 0
+RECALL_K = 10
 answerable = sum(1 for q in questions if not q.get("unanswerable"))
 unanswerable = len(questions) - answerable
 
 for q in questions:
+    """
+    Retrieval is scored separately from the answer, and at two levels.
+    File recall asks whether the right document appears at all; passage
+    recall asks whether a retrieved passage actually contains the fact.
+    Only the second one means the model could have answered: a 700 KB
+    novel is one file, so having it in the top ten says nothing.
+    """
+    recalled = recalled_passage = None
+    if not q.get("unanswerable") and q.get("source"):
+        ps, _, _ = run([args.bin, "search", "--data", args.data, "--collection", args.collection,
+                        "--json", "--topk", str(RECALL_K), "--query", q["q"]])
+        hits = json.loads(ps.stdout)["hits"] if ps.returncode == 0 else []
+        recalled = q["source"] in [os.path.basename(h["path"]) for h in hits]
+        recalled_passage = any(contains_fact(h.get("text", ""), e)
+                               for h in hits for e in q["expect"])
+        ok_recall_file += bool(recalled)
+        ok_recall_passage += bool(recalled_passage)
+
     p, elapsed, _ = run([args.bin, "ask", "--data", args.data, "--collection", args.collection,
                          "--json", q["q"]])
-    row = {"id": q["id"], "q": q["q"], "seconds": round(elapsed, 1)}
+    row = {"id": q["id"], "q": q["q"], "seconds": round(elapsed, 1),
+           "recalled_file": recalled, "recalled_passage": recalled_passage}
     if p.returncode != 0:
         row["error"] = p.stderr.strip()[-300:]
         results["questions"].append(row)
@@ -98,10 +140,7 @@ for q in questions:
         row["correct"] = not a["found"]
         ok_refusal += bool(row["correct"])
     else:
-        # The expected fact may be written with or without the thousands commas.
-        def norm(s):
-            return re.sub(r"[,\s]", "", s.lower())
-        row["correct"] = any(norm(e) in norm(text) for e in q["expect"])
+        row["correct"] = any(contains_fact(text, e) for e in q["expect"])
         row["cited_source"] = q["source"] in cited if q.get("source") else None
         ok_answer += bool(row["correct"])
         ok_citation += bool(row["cited_source"])
@@ -114,6 +153,8 @@ results["score"] = {
     "answerable": answerable,
     "answered_correctly": ok_answer,
     "cited_correct_source": ok_citation,
+    "file_recall_at_%d" % RECALL_K: ok_recall_file,
+    "passage_recall_at_%d" % RECALL_K: ok_recall_passage,
     "unanswerable": unanswerable,
     "refused_correctly": ok_refusal,
     "median_seconds": round(sorted(r["seconds"] for r in results["questions"])[len(questions) // 2], 1),
@@ -121,5 +162,7 @@ results["score"] = {
 pathlib.Path(args.out).write_text(json.dumps(results, indent=2, ensure_ascii=False), encoding="utf-8")
 s = results["score"]
 print(f"\nanswers {s['answered_correctly']}/{answerable}, citations {s['cited_correct_source']}/{answerable}, "
+      f"file recall@{RECALL_K} {s['file_recall_at_%d' % RECALL_K]}/{answerable}, "
+      f"passage recall@{RECALL_K} {s['passage_recall_at_%d' % RECALL_K]}/{answerable}, "
       f"refusals {s['refused_correctly']}/{unanswerable}, median {s['median_seconds']}s")
 print(f"written to {args.out}")

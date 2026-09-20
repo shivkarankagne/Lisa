@@ -1,48 +1,513 @@
 {
-  "corpus": "benchmark/w0/corpus (26 public documents + 25 synthetic; see fetch_corpus.sh and make_synthetic.py)",
-  "note": "Ground truth was read from the documents themselves. `expect` lists strings; an answer scores correct if it contains any of them (numbers are written as the documents write them). `source` is the file whose passage should be cited. `unanswerable` questions must be refused.",
-  "questions": [
-    { "id": 1, "q": "What is the monthly rent for the Yenda premises?",
-      "expect": ["18,500"], "source": "rent-agreement-yenda.docx" },
-    { "id": 2, "q": "How much notice must a tenant give to end the Yenda rent agreement?",
-      "expect": ["two months", "2 months"], "source": "rent-agreement-yenda.docx" },
-    { "id": 3, "q": "How many days of paid annual leave do employees get, and how many can be carried forward?",
-      "expect": ["24"], "source": "hr-leave-policy.md" },
-    { "id": 4, "q": "What is the domestic per diem, and above what amount does an expense need prior approval?",
-      "expect": ["2,000"], "source": "expense-policy.md" },
-    { "id": 5, "q": "What is Anjali Sharma's annual cost to company?",
-      "expect": ["9,60,000", "960,000"], "source": "employment-offer-sharma.docx" },
-    { "id": 6, "q": "How long is the warranty on the Snowdrop reader, and what is excluded?",
-      "expect": ["24 months", "two years"], "source": "warranty-terms.md" },
-    { "id": 7, "q": "What is the first response time for a critical support issue?",
-      "expect": ["4 hours", "four hours"], "source": "sla-support.md" },
-    { "id": 8, "q": "Why did production line 2 stop in March 2026, and for how long?",
-      "expect": ["six hours", "6 hours"], "source": "incident-report-2026-03.md" },
-    { "id": 9, "q": "How long does the Snowdrop reader's battery last, and how much does it weigh?",
-      "expect": ["8 hours"], "source": "product-spec-snowdrop.md" },
-    { "id": 10, "q": "What were the payment terms on invoice SNW-2026-114 and the total due?",
-      "expect": ["165,200", "30 days"], "source": "invoice-2026-114.txt" },
-    { "id": 11, "q": "What was the closing balance of the company account on 31 March 2026?",
-      "expect": ["2,18,760", "218,760"], "source": "bank-statement-extract.txt" },
-    { "id": 12, "q": "Who received the five Snowdrop readers in the delivery note, and what serial numbers?",
-      "expect": ["SNW-1121", "Rao"], "source": "scanned-delivery-note.pdf",
-      "note": "image-only PDF: needs text recognition" },
-    { "id": 13, "q": "किराया हर महीने की कितनी तारीख तक जमा करना है?",
-      "expect": ["पाँच", "5", "fifth"], "source": "hindi-notice.md" },
-    { "id": 14, "q": "How often must the periodic inspection of an energy control procedure be done under the lockout/tagout rule?",
-      "expect": ["annually", "at least annually", "once a year"], "source": "osha-lockout-tagout.pdf" },
-    { "id": 15, "q": "What information about runways must a pilot in command gather before a flight?",
-      "expect": ["runway length", "takeoff and landing distance"], "source": "faa-preflight-action.pdf" },
-    { "id": 16, "q": "When may a motor vehicle not be operated on a tire, according to the federal rules?",
-      "expect": ["body ply", "tread", "audible leak", "separation"], "source": "dot-tires.pdf" },
-    { "id": 17, "q": "What is the quality control unit responsible for approving or rejecting?",
-      "expect": ["drug products", "procedures", "specifications"], "source": "fda-quality-control-unit.pdf" },
-    { "id": 18, "q": "What percentage of employment-related expenses can the child and dependent care credit be, and what is the dollar limit for one qualifying person?",
-      "expect": ["35", "3,000"], "source": "child-dependent-care.pdf" },
-    { "id": 19, "q": "How does Pride and Prejudice begin?",
-      "expect": ["truth universally acknowledged"], "source": "pride-and-prejudice.txt" },
-    { "id": 20, "q": "What is the cost of a Snowdrop reader subscription in Germany?",
-      "expect": [], "source": null, "unanswerable": true,
-      "note": "nothing in the corpus answers this; a correct system refuses" }
-  ]
+ "corpus": "benchmark/w0/corpus (26 public documents + 25 synthetic; see fetch_corpus.sh and make_synthetic.py)",
+ "note": "Ground truth was read from the documents themselves. `expect` lists strings; an answer scores correct if it contains any of them (numbers are written as the documents write them). `source` is the file whose passage should be cited. `unanswerable` questions must be refused.",
+ "questions": [
+  {
+   "id": 1,
+   "q": "What is the monthly rent for the Yenda premises?",
+   "expect": [
+    "18,500"
+   ],
+   "source": "rent-agreement-yenda.docx"
+  },
+  {
+   "id": 2,
+   "q": "How much notice must a tenant give to end the Yenda rent agreement?",
+   "expect": [
+    "two months",
+    "2 months"
+   ],
+   "source": "rent-agreement-yenda.docx"
+  },
+  {
+   "id": 3,
+   "q": "How many days of paid annual leave do employees get, and how many can be carried forward?",
+   "expect": [
+    "24"
+   ],
+   "source": "hr-leave-policy.md"
+  },
+  {
+   "id": 4,
+   "q": "What is the domestic per diem, and above what amount does an expense need prior approval?",
+   "expect": [
+    "2,000"
+   ],
+   "source": "expense-policy.md"
+  },
+  {
+   "id": 5,
+   "q": "What is Anjali Sharma's annual cost to company?",
+   "expect": [
+    "9,60,000",
+    "960,000"
+   ],
+   "source": "employment-offer-sharma.docx"
+  },
+  {
+   "id": 6,
+   "q": "How long is the warranty on the Snowdrop reader, and what is excluded?",
+   "expect": [
+    "24 months",
+    "two years"
+   ],
+   "source": "warranty-terms.md"
+  },
+  {
+   "id": 7,
+   "q": "What is the first response time for a critical support issue?",
+   "expect": [
+    "4 hours",
+    "four hours"
+   ],
+   "source": "sla-support.md"
+  },
+  {
+   "id": 8,
+   "q": "Why did production line 2 stop in March 2026, and for how long?",
+   "expect": [
+    "six hours",
+    "6 hours"
+   ],
+   "source": "incident-report-2026-03.md"
+  },
+  {
+   "id": 9,
+   "q": "How long does the Snowdrop reader's battery last, and how much does it weigh?",
+   "expect": [
+    "8 hours"
+   ],
+   "source": "product-spec-snowdrop.md"
+  },
+  {
+   "id": 10,
+   "q": "What were the payment terms on invoice SNW-2026-114 and the total due?",
+   "expect": [
+    "165,200",
+    "30 days"
+   ],
+   "source": "invoice-2026-114.txt"
+  },
+  {
+   "id": 11,
+   "q": "What was the closing balance of the company account on 31 March 2026?",
+   "expect": [
+    "2,18,760",
+    "218,760"
+   ],
+   "source": "bank-statement-extract.txt"
+  },
+  {
+   "id": 12,
+   "q": "Who received the five Snowdrop readers in the delivery note, and what serial numbers?",
+   "expect": [
+    "SNW-1121",
+    "Rao"
+   ],
+   "source": "scanned-delivery-note.pdf",
+   "note": "image-only PDF: needs text recognition"
+  },
+  {
+   "id": 13,
+   "q": "किराया हर महीने की कितनी तारीख तक जमा करना है?",
+   "expect": [
+    "पाँच",
+    "5",
+    "fifth"
+   ],
+   "source": "hindi-notice.md"
+  },
+  {
+   "id": 14,
+   "q": "How often must the periodic inspection of an energy control procedure be done under the lockout/tagout rule?",
+   "expect": [
+    "annually",
+    "at least annually",
+    "once a year"
+   ],
+   "source": "osha-lockout-tagout.pdf"
+  },
+  {
+   "id": 15,
+   "q": "What information about runways must a pilot in command gather before a flight?",
+   "expect": [
+    "runway length",
+    "takeoff and landing distance"
+   ],
+   "source": "faa-preflight-action.pdf"
+  },
+  {
+   "id": 16,
+   "q": "When may a motor vehicle not be operated on a tire, according to the federal rules?",
+   "expect": [
+    "body ply",
+    "tread",
+    "audible leak",
+    "separation"
+   ],
+   "source": "dot-tires.pdf"
+  },
+  {
+   "id": 17,
+   "q": "What is the quality control unit responsible for approving or rejecting?",
+   "expect": [
+    "drug products",
+    "procedures",
+    "specifications"
+   ],
+   "source": "fda-quality-control-unit.pdf"
+  },
+  {
+   "id": 18,
+   "q": "What percentage of employment-related expenses can the child and dependent care credit be, and what is the dollar limit for one qualifying person?",
+   "expect": [
+    "35",
+    "3,000"
+   ],
+   "source": "child-dependent-care.pdf"
+  },
+  {
+   "id": 19,
+   "q": "How does Pride and Prejudice begin?",
+   "expect": [
+    "truth universally acknowledged"
+   ],
+   "source": "pride-and-prejudice.txt"
+  },
+  {
+   "id": 20,
+   "q": "What is the cost of a Snowdrop reader subscription in Germany?",
+   "expect": [],
+   "source": null,
+   "unanswerable": true,
+   "note": "nothing in the corpus answers this; a correct system refuses"
+  },
+  {
+   "id": 21,
+   "q": "How many unused leave days can be carried into the next year?",
+   "expect": [
+    "10",
+    "ten"
+   ],
+   "source": "hr-leave-policy.md"
+  },
+  {
+   "id": 22,
+   "q": "From which day of sickness is a medical certificate required?",
+   "expect": [
+    "third"
+   ],
+   "source": "hr-leave-policy.md"
+  },
+  {
+   "id": 23,
+   "q": "What is the hotel limit per night in metro cities?",
+   "expect": [
+    "6,500"
+   ],
+   "source": "expense-policy.md"
+  },
+  {
+   "id": 24,
+   "q": "Within how long must expense claims be filed?",
+   "expect": [
+    "30 days",
+    "thirty days"
+   ],
+   "source": "expense-policy.md"
+  },
+  {
+   "id": 25,
+   "q": "What uptime does the support agreement commit to?",
+   "expect": [
+    "99.5"
+   ],
+   "source": "sla-support.md"
+  },
+  {
+   "id": 26,
+   "q": "What are the support hours, and on which days?",
+   "expect": [
+    "09:00",
+    "19:00",
+    "9 am"
+   ],
+   "source": "sla-support.md"
+  },
+  {
+   "id": 27,
+   "q": "What does the Snowdrop warranty not cover?",
+   "expect": [
+    "water damage",
+    "third-party",
+    "broken display"
+   ],
+   "source": "warranty-terms.md"
+  },
+  {
+   "id": 28,
+   "q": "How quickly is a replacement unit shipped after the defective one arrives?",
+   "expect": [
+    "five working days",
+    "5 working days"
+   ],
+   "source": "warranty-terms.md"
+  },
+  {
+   "id": 29,
+   "q": "How much does the Snowdrop reader weigh?",
+   "expect": [
+    "320"
+   ],
+   "source": "product-spec-snowdrop.md"
+  },
+  {
+   "id": 30,
+   "q": "At what temperature must cartridges be stored?",
+   "expect": [
+    "2 to 8",
+    "2-8"
+   ],
+   "source": "product-spec-snowdrop.md"
+  },
+  {
+   "id": 31,
+   "q": "What does error E-14 on the reader mean?",
+   "expect": [
+    "expired"
+   ],
+   "source": "training-manual.md"
+  },
+  {
+   "id": 32,
+   "q": "What does error E-22 mean and what should the user do?",
+   "expect": [
+    "too small",
+    "fresh cartridge"
+   ],
+   "source": "training-manual.md"
+  },
+  {
+   "id": 33,
+   "q": "What is the vibration limit for pump P-7?",
+   "expect": [
+    "40 Hz",
+    "40"
+   ],
+   "source": "maintenance-log-pump.md"
+  },
+  {
+   "id": 34,
+   "q": "When was the main bearing of pump P-7 replaced?",
+   "expect": [
+    "2026-03-17",
+    "17 March",
+    "March 17"
+   ],
+   "source": "maintenance-log-pump.md"
+  },
+  {
+   "id": 35,
+   "q": "How often are fire drills held, and where does everyone assemble?",
+   "expect": [
+    "Gate B"
+   ],
+   "source": "safety-sop.md"
+  },
+  {
+   "id": 36,
+   "q": "Until when is calibration certificate CAL-2026-0417 valid?",
+   "expect": [
+    "2027-02-14",
+    "February 2027"
+   ],
+   "source": "calibration-certificate.txt"
+  },
+  {
+   "id": 37,
+   "q": "What deviation was measured on the digital thermometer?",
+   "expect": [
+    "0.2"
+   ],
+   "source": "calibration-certificate.txt"
+  },
+  {
+   "id": 38,
+   "q": "What is the sum insured per family under the group health policy?",
+   "expect": [
+    "5,00,000",
+    "500,000"
+   ],
+   "source": "insurance-policy.txt"
+  },
+  {
+   "id": 39,
+   "q": "What is the room rent limit per day under the health policy?",
+   "expect": [
+    "5,000"
+   ],
+   "source": "insurance-policy.txt"
+  },
+  {
+   "id": 40,
+   "q": "After what waiting period is maternity covered, and up to what amount?",
+   "expect": [
+    "nine month",
+    "9 month",
+    "50,000"
+   ],
+   "source": "insurance-policy.txt"
+  },
+  {
+   "id": 41,
+   "q": "Within how many hours must a claim be intimated after admission?",
+   "expect": [
+    "48"
+   ],
+   "source": "insurance-policy.txt"
+  },
+  {
+   "id": 42,
+   "q": "Which flight is the return from Bengaluru, and at what time?",
+   "expect": [
+    "6E-771",
+    "19:40"
+   ],
+   "source": "travel-itinerary.txt"
+  },
+  {
+   "id": 43,
+   "q": "What is the hotel booking reference for the Bengaluru trip?",
+   "expect": [
+    "SR-2026-8841"
+   ],
+   "source": "travel-itinerary.txt"
+  },
+  {
+   "id": 44,
+   "q": "How many cartridges were in batch CT-2026-031, and how many were rejected?",
+   "expect": [
+    "2,000",
+    "zero"
+   ],
+   "source": "quality-checklist.txt"
+  },
+  {
+   "id": 45,
+   "q": "What happens to cartridges that fail the cold chain check?",
+   "expect": [
+    "quarantined",
+    "seven days"
+   ],
+   "source": "quality-checklist.txt"
+  },
+  {
+   "id": 46,
+   "q": "To what amount was the authorised share capital increased?",
+   "expect": [
+    "25,00,000",
+    "2,500,000"
+   ],
+   "source": "board-minutes-2026-02.docx"
+  },
+  {
+   "id": 47,
+   "q": "Who was appointed auditor for 2025-26, and for what fee?",
+   "expect": [
+    "45,000",
+    "Mohindra"
+   ],
+   "source": "board-minutes-2026-02.docx"
+  },
+  {
+   "id": 48,
+   "q": "What are the payment terms in the Kirloskar vendor agreement, and the interest on late payment?",
+   "expect": [
+    "45 days",
+    "1.5"
+   ],
+   "source": "vendor-agreement-kirloskar.docx"
+  },
+  {
+   "id": 49,
+   "q": "What warranty does Kirloskar give on bearings?",
+   "expect": [
+    "12 months",
+    "twelve months"
+   ],
+   "source": "vendor-agreement-kirloskar.docx"
+  },
+  {
+   "id": 50,
+   "q": "What is the price per box of cartridges for an order above 400 boxes?",
+   "expect": [
+    "1,150"
+   ],
+   "source": "supplier-quote-cartridges.docx"
+  },
+  {
+   "id": 51,
+   "q": "What is the minimum order quantity in quotation QT-2026-233?",
+   "expect": [
+    "500"
+   ],
+   "source": "supplier-quote-cartridges.docx"
+  },
+  {
+   "id": 52,
+   "q": "What was the cartridge yield in February, and the target for March?",
+   "expect": [
+    "92",
+    "95"
+   ],
+   "source": "meeting-notes-2026-02-18.md"
+  },
+  {
+   "id": 53,
+   "q": "What is the approval number on the site approval from the district collector?",
+   "expect": [
+    "DC-UTN-2026-77"
+   ],
+   "source": "scanned-site-approval.pdf"
+  },
+  {
+   "id": 54,
+   "q": "प्रशिक्षण कार्यक्रम किती दिवसांचा आहे?",
+   "expect": [
+    "तीन",
+    "three",
+    "3"
+   ],
+   "source": "marathi-letter.txt"
+  },
+  {
+   "id": 55,
+   "q": "How does Moby-Dick begin?",
+   "expect": [
+    "Call me Ishmael"
+   ],
+   "source": "moby-dick.txt"
+  },
+  {
+   "id": 56,
+   "q": "What is the Snowdrop reader's retail price in Japan?",
+   "expect": [],
+   "source": null,
+   "unanswerable": true
+  },
+  {
+   "id": 57,
+   "q": "How many employees does Kirloskar Spares have?",
+   "expect": [],
+   "source": null,
+   "unanswerable": true
+  },
+  {
+   "id": 58,
+   "q": "What was Snowdrop Medtech's revenue in 2025-26?",
+   "expect": [],
+   "source": null,
+   "unanswerable": true
+  }
+ ]
 }
