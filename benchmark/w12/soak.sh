@@ -20,6 +20,7 @@ BIN=$ROOT/build/lisa
 PORT=${PORT:-8731}
 OUT=$(cd "$(dirname "$0")" && pwd)/soak-$(date +%Y%m%d-%H%M%S)
 GROWTH_ALLOWED_PERCENT=${GROWTH_ALLOWED_PERCENT:-10}
+SAMPLE_SECONDS=${SAMPLE_SECONDS:-60}
 
 mkdir -p "$OUT"
 [ -x "$BIN" ] || { echo "no binary at $BIN"; exit 2; }
@@ -52,7 +53,11 @@ QUESTIONS=("What is the monthly rent for the Yenda premises?"
            "What is the sum insured per family?"
            "Who won the cricket world cup in 2011?")
 
-END=$(( $(date +%s) + HOURS * 3600 ))
+# Fractional hours are allowed, so that the script can be smoke-tested
+# before an eight-hour run; shell arithmetic is integer only.
+SECONDS_TOTAL=$(python3 -c "print(int(float('$HOURS') * 3600))")
+[ "$SECONDS_TOTAL" -gt 0 ] || { echo "hours must be greater than zero"; exit 2; }
+END=$(( $(date +%s) + SECONDS_TOTAL ))
 NEXT_SAMPLE=0
 i=0
 failures=0
@@ -65,11 +70,11 @@ while [ "$(date +%s)" -lt "$END" ]; do
     i=$((i + 1))
 
     now=$(date +%s)
-    if [ "$now" -ge "$NEXT_SAMPLE" ]; then
+    if [ "$now" -ge "$NEXT_SAMPLE" ] || [ "$now" -ge "$END" ]; then
         rss=$(ps -o rss= -p $SPID | tr -d ' ')
         [ -n "$rss" ] || { echo "server died after $i requests"; exit 1; }
         echo "$now,$rss,$i,$failures" >> "$OUT/memory.csv"
-        NEXT_SAMPLE=$((now + 60))
+        NEXT_SAMPLE=$((now + SAMPLE_SECONDS))
     fi
 done
 
