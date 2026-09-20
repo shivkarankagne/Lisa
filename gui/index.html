@@ -16,6 +16,8 @@
   <p class="tagline">Answers from your documents. Nothing leaves this computer.</p>
   <nav class="top-actions" aria-label="Views">
     <button type="button" id="nav-ask" class="tab" aria-pressed="true">Ask</button>
+    <button type="button" id="nav-docs" class="tab" aria-pressed="false">Documents</button>
+    <button type="button" id="nav-folders" class="tab" aria-pressed="false">Folders</button>
     <button type="button" id="nav-settings" class="tab" aria-pressed="false">Settings</button>
     <button type="button" id="theme" class="ghost" aria-label="Theme: automatic">Theme: auto</button>
   </nav>
@@ -100,6 +102,13 @@
     </section>
   </main>
 </div>
+
+<main class="settings" id="view-docs" hidden aria-labelledby="docs-heading">
+  <h2 id="docs-heading">Documents in <span id="docs-collection"></span></h2>
+  <p id="docs-summary" class="muted"></p>
+  <p id="docs-problems" class="help"></p>
+  <ol id="docs-list" class="doclist"></ol>
+</main>
 
 <main class="settings" id="view-settings" hidden aria-labelledby="settings-heading">
   <h2 id="settings-heading">Settings</h2>

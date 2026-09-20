@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
+#include <unistd.h>
 
 #include "yyjson.h"
 #include "../platform/platform.h"
@@ -311,6 +313,54 @@ int app_default_watch_folders(char** out, int cap) {
         else free(p);
     }
     return n;
+}
+
+/* ---- the running server ------------------------------------------------ */
+
+static char* server_file(const app_t* app) {
+    return lisa_path_join(app->data_dir, "server.json");
+}
+
+int app_server_announce(const app_t* app, int port, const char* token) {
+    char* path = server_file(app);
+    if (path == NULL) return LISA_E_NO_MEMORY;
+    FILE* f = fopen(path, "wb");
+    free(path);
+    if (f == NULL) return LISA_E_IO;
+    fprintf(f, "{\"port\": %d, \"pid\": %lld, \"token\": \"%s\"}\n", port,
+            (long long)getpid(), token ? token : "");
+    int rc = lisa_file_sync(f) == LISA_PLAT_OK ? LISA_OK : LISA_E_IO;
+    fclose(f);
+    return rc;
+}
+
+void app_server_forget(const app_t* app) {
+    char* path = server_file(app);
+    if (path == NULL) return;
+    lisa_remove_file(path);
+    free(path);
+}
+
+int app_server_running(const app_t* app, int* port) {
+    if (port) *port = 0;
+    char* path = server_file(app);
+    if (path == NULL) return 0;
+    yyjson_doc* doc = lisa_path_exists(path) ? yyjson_read_file(path, 0, NULL, NULL) : NULL;
+    int alive = 0;
+    if (doc) {
+        yyjson_val* root = yyjson_doc_get_root(doc);
+        int64_t pid = yyjson_get_sint(yyjson_obj_get(root, "pid"));
+        int64_t p = yyjson_get_sint(yyjson_obj_get(root, "port"));
+        /* A file left behind by a crash names a process that is gone. */
+        if (pid > 0 && kill((pid_t)pid, 0) == 0) {
+            alive = 1;
+            if (port) *port = (int)p;
+        }
+        yyjson_doc_free(doc);
+    }
+    if (!alive) lisa_remove_file(path);
+    free(path);
+    return alive;
 }
 
 int app_load_model(const app_t* app, app_model_kind kind, lisa_model_t** out, const char** err) {

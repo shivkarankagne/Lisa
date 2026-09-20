@@ -89,6 +89,17 @@ object as below.
 
 `state`: `queued`, `running`, `succeeded`, `failed` (with `error`), `cancelled`.
 
+### `GET /v1/collections/{name}/documents`  (since 0.6)
+
+What is in a collection, and what could not be read:
+
+    {"documents": [{"path": "/.../manual.pdf", "title": "Manual", "status": "ok",
+                    "chunks": 143, "size": 1832910}],
+     "readable": 158, "without_text": 8, "failed": 1, "passages": 4371}
+
+`status`: `ok`, `no_text` (a scan with nothing recognised), or `error`
+(with `message`).
+
 ### `POST /v1/collections/{name}/search`
 
     {"query": "bearing inspection", "topk": 5, "mode": "hybrid"}

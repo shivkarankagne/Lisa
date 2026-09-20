@@ -138,6 +138,22 @@ static int parse_args(int argc, char** argv, args_t* a) {
     return 0;
 }
 
+/*
+ * The models do not fit twice on a small machine: a second copy fails to
+ * allocate on the GPU and leaves files unindexed. If LISA is already
+ * running on this data directory, say so instead of fighting it.
+ */
+static int busy_with_running_lisa(const app_t* app, const char* what) {
+    int port = 0;
+    if (!app_server_running(app, &port)) return 0;
+    fprintf(stderr,
+            "lisa: LISA is already running on this data directory (http://127.0.0.1:%d).\n"
+            "      Use that window for %s, or quit it first. Running two copies would\n"
+            "      load the models twice and run the machine out of memory.\n",
+            port, what);
+    return 1;
+}
+
 static int need_collection(const args_t* a) {
     if (a->collection == NULL) {
         fprintf(stderr, "lisa: --collection <name> is required\n");
@@ -162,6 +178,7 @@ static void print_json(yyjson_mut_doc* doc) {
 static int cmd_ingest(app_t* app, const args_t* a) {
     int bad = need_collection(a);
     if (bad) return bad;
+    if (busy_with_running_lisa(app, "indexing")) return EXIT_BUSY;
     if (a->n_pos == 0) {
         fprintf(stderr, "lisa: give at least one file or folder to ingest\n");
         return EXIT_USAGE;
@@ -301,6 +318,7 @@ static void print_snippet(const char* text, size_t max) {
 static int cmd_search(app_t* app, const args_t* a) {
     int bad = need_collection(a);
     if (bad) return bad;
+    if (busy_with_running_lisa(app, "searching")) return EXIT_BUSY;
     const char* q = a->query ? a->query : (a->n_pos == 1 ? a->pos[0] : NULL);
     if (q == NULL || q[0] == '\0') {
         fprintf(stderr, "lisa: --query \"<text>\" is required\n");
@@ -363,6 +381,7 @@ static int print_piece(void* user, const char* text, int64_t len) {
 static int cmd_ask(app_t* app, const args_t* a) {
     int bad = need_collection(a);
     if (bad) return bad;
+    if (busy_with_running_lisa(app, "questions")) return EXIT_BUSY;
     if (a->n_pos != 1 || a->pos[0][0] == '\0') {
         fprintf(stderr, "lisa: give one question, in quotes\n");
         return EXIT_USAGE;
@@ -449,10 +468,12 @@ static int cmd_serve(app_t* app, const args_t* a) {
                server_port(srv), server_token(srv));
         printf("Ctrl-C stops the server.\n");
         LOG_INFO("serve: listening on 127.0.0.1:%d", server_port(srv));
+        app_server_announce(app, server_port(srv), server_token(srv));
         fflush(stdout);
         while (!lisa_stop_requested()) lisa_sleep_ms(200);
         printf("Stopping...\n");
         LOG_INFO("serve: stopping");
+        app_server_forget(app);
         server_stop(srv);
     }
     lisa_model_free(chat);
@@ -469,6 +490,7 @@ static int cmd_gui(app_t* app, const args_t* a) {
     if (rc == LISA_OK) {
         char url[256];
         snprintf(url, sizeof(url), "http://127.0.0.1:%d/#token=%s", server_port(srv), server_token(srv));
+        app_server_announce(app, server_port(srv), server_token(srv));
         int use_browser = a->browser || !gui_native_available();
         if (!use_browser) {
             fprintf(stderr, "LISA is open in its window. Close the window (or press Ctrl-C) to quit.\n");
@@ -483,6 +505,7 @@ static int cmd_gui(app_t* app, const args_t* a) {
             fflush(stdout);
             while (!lisa_stop_requested()) lisa_sleep_ms(200);
         }
+        app_server_forget(app);
         server_stop(srv);
     }
     lisa_model_free(chat);

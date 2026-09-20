@@ -84,6 +84,9 @@ $("theme").addEventListener("click", () => {
 
 // ---- views -----------------------------------------------------------------
 function showView(name) {
+  $("setup").hidden = true;
+  $("view-docs").hidden = true;
+  $("nav-docs").setAttribute("aria-pressed", "false");
   const ask = name === "ask";
   $("view-ask").hidden = !ask;
   $("view-settings").hidden = ask;
@@ -91,6 +94,7 @@ function showView(name) {
   $("nav-settings").setAttribute("aria-pressed", String(!ask));
   if (!ask) loadSettings();
 }
+$("nav-folders").addEventListener("click", () => openSetup());
 $("nav-ask").addEventListener("click", () => showView("ask"));
 $("nav-settings").addEventListener("click", () => showView("settings"));
 
@@ -358,6 +362,11 @@ function emptyNotice(name) {
 }
 
 async function ask(question) {
+  /* A question about the collection itself is answered from the index. */
+  if (ABOUT_COLLECTION.test(question.trim())) {
+    await showDocuments();
+    return;
+  }
   const coll = collections.find((c) => c.name === current);
   if (coll && coll.chunks === 0) {
     $("answer").hidden = false;
@@ -424,9 +433,71 @@ $("question").addEventListener("keydown", (ev) => {
   }
 });
 
+// ---- what is in the collection --------------------------------------------------------
+/*
+ * Questions about the collection itself ("what files are added", "how
+ * many documents") are answered from the index, not by the model: it has
+ * never seen the file list, so it can only guess.
+ */
+const ABOUT_COLLECTION = /^(what|which|how many|list)\b.*\b(files?|documents?|folders?|pdfs?|indexed|added|failed|read)\b/i;
+
+async function showDocuments() {
+  if (!current) return;
+  const d = await api("GET", "/v1/collections/" + encodeURIComponent(current) + "/documents");
+  $("docs-collection").textContent = "\u201c" + current + "\u201d";
+  $("docs-summary").textContent =
+    `${d.readable} documents readable, ${d.passages} passages` +
+    (d.without_text ? `, ${d.without_text} with no text (scans without recognisable words)` : "") +
+    (d.failed ? `, ${d.failed} could not be read` : "") + ".";
+  const problems = (d.documents || []).filter((x) => x.status !== "ok");
+  $("docs-problems").textContent = problems.length
+    ? "LISA cannot answer from the files listed in orange."
+    : "Every file was read.";
+  const ol = $("docs-list");
+  ol.replaceChildren();
+  for (const doc of (d.documents || []).sort((a, b) => b.chunks - a.chunks)) {
+    const li = document.createElement("li");
+    const name = document.createElement("span");
+    name.textContent = doc.path.split("/").pop();
+    if (doc.status !== "ok") name.className = "bad";
+    const why = document.createElement("span");
+    why.className = "why";
+    why.textContent = doc.status === "ok" ? ` \u00b7 ${doc.chunks} passages`
+                                          : ` \u00b7 ${doc.message || doc.status}`;
+    li.append(name, why);
+    ol.append(li);
+  }
+  $("view-docs").hidden = false;
+  $("view-ask").hidden = true;
+  $("view-settings").hidden = true;
+  $("setup").hidden = true;
+  $("nav-docs").setAttribute("aria-pressed", "true");
+  $("nav-ask").setAttribute("aria-pressed", "false");
+  $("nav-settings").setAttribute("aria-pressed", "false");
+}
+
+$("nav-docs").addEventListener("click", () => showDocuments().catch((e) => showBanner(friendly(e))));
+
 // ---- first run: which folders to keep indexed -----------------------------------------
 const WATCH_COLLECTION = "my-documents";
 let setupFolders = [];   // { path, checked }
+
+/* Show the folder panel, ticking what is already watched (or suggested). */
+async function openSetup(settings) {
+  const s = settings || (await api("GET", "/v1/settings"));
+  const chosen = s.watch.folders || [];
+  const suggested = s.watch.suggested || [];
+  setupFolders = suggested.map((path) => ({ path, checked: chosen.length === 0 || chosen.includes(path) }));
+  for (const path of chosen) {
+    if (!setupFolders.some((f) => f.path === path)) setupFolders.push({ path, checked: true });
+  }
+  $("setup-msg").textContent = "";
+  renderSetupFolders();
+  $("setup").hidden = false;
+  $("view-ask").hidden = true;
+  $("view-settings").hidden = true;
+  $("setup-extra").focus();
+}
 
 function renderSetupFolders() {
   const ul = $("setup-folders");
@@ -568,16 +639,10 @@ async function start() {
     }
     await loadCollections();
 
-    /* Nothing watched and nothing indexed yet: offer the folders once. */
+    /* No folders watched yet: offer them. Otherwise show what is indexing. */
     const s = await api("GET", "/v1/settings");
-    if (!s.watch.collection && collections.length === 0) {
-      setupFolders = (s.watch.suggested || []).map((path) => ({ path, checked: true }));
-      renderSetupFolders();
-      $("setup").hidden = false;
-      $("view-ask").hidden = true;
-    } else if (s.watch.collection) {
-      watchProgress();
-    }
+    if (!s.watch.collection) openSetup(s);
+    else watchProgress();
   } catch (e) {
     showBanner(friendly(e));
   }

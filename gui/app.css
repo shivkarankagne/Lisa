@@ -170,3 +170,8 @@ blockquote {
 .folders label { font-weight: 400; margin: 0; overflow-wrap: anywhere; }
 .folders input[type="checkbox"] { width: auto; }
 .setup-actions { margin-top: 1rem; }
+
+.doclist { padding-left: 1.5rem; display: grid; gap: 0.25rem; }
+.doclist li { overflow-wrap: anywhere; }
+.doclist .why { color: var(--muted); }
+.doclist .bad { color: var(--warn-text); background: var(--warn-bg); padding: 0 0.25rem; border-radius: 0.25rem; }

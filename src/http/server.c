@@ -432,6 +432,51 @@ static int h_job(lisa_server_t* s, struct mg_connection* conn, const char* id_te
     return send_doc(conn, 200, out);
 }
 
+typedef struct {
+    yyjson_mut_doc* doc;
+    yyjson_mut_val* arr;
+    int64_t         ok, failed, no_text, chunks;
+} doclist_t;
+
+static int add_document(void* user, const lisa_document_t* d) {
+    doclist_t* l = (doclist_t*)user;
+    yyjson_mut_val* o = yyjson_mut_arr_add_obj(l->doc, l->arr);
+    yyjson_mut_obj_add_strcpy(l->doc, o, "path", d->path);
+    yyjson_mut_obj_add_strcpy(l->doc, o, "title", d->title ? d->title : "");
+    yyjson_mut_obj_add_strcpy(l->doc, o, "status", d->status);
+    if (d->message && d->message[0]) yyjson_mut_obj_add_strcpy(l->doc, o, "message", d->message);
+    yyjson_mut_obj_add_int(l->doc, o, "chunks", d->chunk_count);
+    yyjson_mut_obj_add_int(l->doc, o, "size", d->size);
+    l->chunks += d->chunk_count;
+    if (strcmp(d->status, "ok") == 0) l->ok++;
+    else if (strcmp(d->status, "no_text") == 0) l->no_text++;
+    else l->failed++;
+    return 0;
+}
+
+/* GET /v1/collections/{name}/documents — what is in a collection. */
+static int h_documents(lisa_server_t* s, struct mg_connection* conn, const char* name) {
+    yyjson_mut_doc* out = yyjson_mut_doc_new(NULL);
+    yyjson_mut_val* root = yyjson_mut_obj(out);
+    yyjson_mut_doc_set_root(out, root);
+    doclist_t l = { out, yyjson_mut_obj_add_arr(out, root, "documents"), 0, 0, 0, 0 };
+
+    lisa_mutex_lock(s->engine);
+    lisa_collection_t* c = NULL;
+    int rc = get_collection(s, name, &c);
+    if (rc == LISA_OK) rc = lisa_collection_documents(c, NULL, add_document, &l);
+    lisa_mutex_unlock(s->engine);
+    if (rc != LISA_OK) {
+        yyjson_mut_doc_free(out);
+        return send_status(conn, rc);
+    }
+    yyjson_mut_obj_add_int(out, root, "readable", l.ok);
+    yyjson_mut_obj_add_int(out, root, "without_text", l.no_text);
+    yyjson_mut_obj_add_int(out, root, "failed", l.failed);
+    yyjson_mut_obj_add_int(out, root, "passages", l.chunks);
+    return send_doc(conn, 200, out);
+}
+
 static int h_search(lisa_server_t* s, struct mg_connection* conn, const char* name,
                     const lisa_principal_t* principal) {
     int status = 0;
@@ -840,10 +885,14 @@ static int route(struct mg_connection* conn, void* cbdata) {
         memcpy(name, path + 16, nl);
         name[nl] = '\0';
         rest++;
-        int known = strcmp(rest, "ingest") == 0 || strcmp(rest, "search") == 0 || strcmp(rest, "ask") == 0;
+        int known = strcmp(rest, "ingest") == 0 || strcmp(rest, "search") == 0 ||
+                    strcmp(rest, "ask") == 0 || strcmp(rest, "documents") == 0;
         if (!known) result = h_extension(s, conn, method, path, who);
         else if (!app_valid_name(name))
             result = send_error(conn, 400, "invalid_name", "collection names are 1-64 of [A-Za-z0-9_-]");
+        else if (strcmp(rest, "documents") == 0)
+            result = strcmp(method, "GET") == 0 ? h_documents(s, conn, name)
+                                                : send_error(conn, 405, "method_not_allowed", "use GET");
         else if (strcmp(method, "POST") != 0) result = send_error(conn, 405, "method_not_allowed", "use POST");
         else if (strcmp(rest, "ingest") == 0) result = h_ingest(s, conn, name);
         else if (strcmp(rest, "search") == 0) result = h_search(s, conn, name, who);

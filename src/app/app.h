@@ -86,6 +86,17 @@ int app_set_watch(app_t* app, const char* collection, const char* const* folders
  * that exist. Fills up to `cap` malloc'd paths; returns how many. */
 int app_default_watch_folders(char** out, int cap);
 
+/*
+ * While `lisa serve` or `lisa gui` runs it records its port and process
+ * id in <data>/server.json, so other commands can tell that the models
+ * are already loaded (they do not fit twice on a small machine).
+ * app_server_running fills *port (may be NULL) and returns 1 if a live
+ * server owns this data directory.
+ */
+int  app_server_running(const app_t* app, int* port);
+int  app_server_announce(const app_t* app, int port, const char* token);
+void app_server_forget(const app_t* app);
+
 /* Find and load the model of this kind. *err explains a failure. */
 int app_load_model(const app_t* app, app_model_kind kind, lisa_model_t** out, const char** err);
 
