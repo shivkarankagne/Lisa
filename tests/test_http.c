@@ -47,14 +47,23 @@ static int http_at(int port, const char* method, const char* path, const char* e
     char host[64];
     snprintf(host, sizeof(host), "Host: 127.0.0.1:%d\r\n", port);
     int has_host = extra && strstr(extra, "Host:") != NULL;
-    struct mg_connection* c = mg_download(
-        "127.0.0.1", port, 0, ebuf, sizeof(ebuf),
-        "%s %s HTTP/1.1\r\n%s%s%sContent-Length: %zu\r\nConnection: close\r\n\r\n%s",
-        method, path, has_host ? "" : host, extra ? extra : "",
-        auth ? "Authorization: Bearer " TOKEN "\r\n" : "", body ? strlen(body) : (size_t)0,
-        body ? body : "");
+    /*
+     * mg_download would wait only its default time for the response;
+     * answering a question can take minutes on a slow machine (a CI Mac
+     * generates on the CPU), so connect and wait explicitly.
+     */
+    struct mg_connection* c = mg_connect_client("127.0.0.1", port, 0, ebuf, sizeof(ebuf));
     if (c == NULL) {
         snprintf(g_body, sizeof(g_body), "connect failed: %s", ebuf);
+        return -1;
+    }
+    mg_printf(c, "%s %s HTTP/1.1\r\n%s%s%sContent-Length: %zu\r\nConnection: close\r\n\r\n",
+              method, path, has_host ? "" : host, extra ? extra : "",
+              auth ? "Authorization: Bearer " TOKEN "\r\n" : "", body ? strlen(body) : (size_t)0);
+    if (body && body[0]) mg_write(c, body, strlen(body));
+    if (mg_get_response(c, ebuf, sizeof(ebuf), 600000) < 0) {   /* 10 minutes */
+        snprintf(g_body, sizeof(g_body), "no response: %s", ebuf);
+        mg_close_connection(c);
         return -1;
     }
     const struct mg_response_info* ri = mg_get_response_info(c);

@@ -21,7 +21,9 @@ jobs:
   macos-arm64:
     name: macOS ARM64 (${{ matrix.config.name }})
     runs-on: macos-15
-    timeout-minutes: 90
+    # CI's Macs run the models on the CPU, so the release job's model tests
+    # take hours where a local M2 takes minutes (report 013).
+    timeout-minutes: 300
     strategy:
       fail-fast: false
       matrix:
