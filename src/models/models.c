@@ -18,12 +18,15 @@
 #define DEFAULT_CONTEXT   4096
 #define EMBED_CONTEXT     8192   /* chunks are <= 1,500 chars; dense scripts can exceed 2,048 tokens */
 /*
- * Passages embedded in one GPU call. The context is shared, so each
- * sequence may use EMBED_CONTEXT / EMBED_MAX_SEQ tokens; a longer passage
- * is embedded on its own. Batching is what makes indexing fast: one call
- * per passage leaves the GPU idle between calls.
+ * Passages embedded in one GPU call. The embedding context is shared
+ * between sequences, so each one may use only EMBED_CONTEXT /
+ * EMBED_MAX_SEQ tokens: with 8 sequences a 671-token passage could not be
+ * embedded at all ("find_slot: n_tokens = 671 > size = 512"), and the
+ * file was recorded as failed. Batching also measured only 1.2x on an M2
+ * (report 014) because the GPU is already busy, so one sequence per call
+ * is the safe choice until a smaller embedding model makes it matter.
  */
-#define EMBED_MAX_SEQ     8
+#define EMBED_MAX_SEQ     1
 #define PROMPT_BATCH      512
 #define PENALTY_LAST_N    64
 
