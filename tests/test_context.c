@@ -111,8 +111,8 @@ static void test_budget_fits_best_and_skips_too_big(void) {
     TEST_ASSERT_TRUE(st.prompt_tokens > 0 && st.prompt_tokens <= 400);
     TEST_ASSERT_NOT_NULL(st.system);
     TEST_ASSERT_NOT_NULL(strstr(st.system, CTX_NOT_FOUND_TEXT));
-    TEST_ASSERT_NOT_NULL(strstr(st.user_msg, "[1] (Pump report, page 3)\nThe main bearing seized."));
-    TEST_ASSERT_NOT_NULL(strstr(st.user_msg, "[2] (c.txt)\nVibration rose for weeks."));
+    TEST_ASSERT_NOT_NULL(strstr(st.user_msg, "[S1] (Pump report, page 3)\nThe main bearing seized."));
+    TEST_ASSERT_NOT_NULL(strstr(st.user_msg, "[S2] (c.txt)\nVibration rose for weeks."));
     TEST_ASSERT_NOT_NULL(strstr(st.user_msg, "Question: Why did the pump fail?"));
     TEST_ASSERT_NULL(strstr(st.user_msg, "xxxx"));
     ctx_state_clear(&st);
@@ -178,6 +178,14 @@ static void test_run_pipeline(void) {
 
 static void test_parse_citations(void) {
     int32_t c[8];
+    TEST_ASSERT_EQUAL_INT64(3, ctx_parse_citations("A [S2]. B [S1][S3]. C [S2].", 3, c, 8));
+    TEST_ASSERT_EQUAL_INT32(2, c[0]);
+    TEST_ASSERT_EQUAL_INT32(1, c[1]);
+    TEST_ASSERT_EQUAL_INT32(3, c[2]);
+    TEST_ASSERT_EQUAL_INT64(2, ctx_parse_citations("x [S3, S1] y", 3, c, 8));
+    TEST_ASSERT_EQUAL_INT32(3, c[0]);
+    TEST_ASSERT_EQUAL_INT32(1, c[1]);
+    /* A bare number is still accepted: models sometimes drop the letter. */
     TEST_ASSERT_EQUAL_INT64(3, ctx_parse_citations("A [2]. B [1][3]. C [2].", 3, c, 8));
     TEST_ASSERT_EQUAL_INT32(2, c[0]);
     TEST_ASSERT_EQUAL_INT32(1, c[1]);

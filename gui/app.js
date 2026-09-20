@@ -254,12 +254,12 @@ let lastCitations = [];
 function renderAnswerText(el, text, citations) {
   el.replaceChildren();
   const byNum = new Map(citations.map((c) => [c.number, c]));
-  const re = /\[(\d+(?:\s*,\s*\d+)*)\]/g;
+  const re = /\[[Ss]?(\d+(?:\s*,\s*[Ss]?\d+)*)\]/g;
   let last = 0;
   let m;
   while ((m = re.exec(text)) !== null) {
     el.append(document.createTextNode(text.slice(last, m.index)));
-    for (const n of m[1].split(",").map((x) => parseInt(x, 10))) {
+    for (const n of m[1].split(",").map((x) => parseInt(x.replace(/[Ss]/, ""), 10))) {
       const c = byNum.get(n);
       if (!c) {
         el.append(document.createTextNode("[" + n + "]"));
@@ -268,7 +268,7 @@ function renderAnswerText(el, text, citations) {
       const b = document.createElement("button");
       b.type = "button";
       b.className = "cite";
-      b.textContent = "[" + n + "]";
+      b.textContent = "[S" + n + "]";
       b.setAttribute("aria-label", "Source " + n + ": " + sourceName(c));
       b.addEventListener("click", () => showPassage(c));
       el.append(b);

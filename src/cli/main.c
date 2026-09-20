@@ -402,7 +402,7 @@ static int cmd_ask(app_t* app, const args_t* a) {
         if (ans->citation_count > 0) printf("\nSources:\n");
         for (int64_t i = 0; i < ans->citation_count; i++) {
             const lisa_citation_t* ci = &ans->citations[i];
-            printf("  [%d] %s", ci->number, ci->source_path);
+            printf("  [S%d] %s", ci->number, ci->source_path);
             if (ci->page > 0) printf(", page %lld", (long long)ci->page);
             printf("\n");
         }

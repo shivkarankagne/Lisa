@@ -106,7 +106,7 @@ object as below.
 One message in 1.0 (more returns `400 unsupported`; follow-up chat comes
 later without changing this shape).
 
-    {"text": "Every 500 hours [1].", "found": true, "complete": true,
+    {"text": "Every 500 hours [S1].", "found": true, "complete": true,
      "citations": [{"number": 1, "chunk_id": 1, "path": "/.../manual.pdf", "title": "LISA Test Manual",
                     "page": 1, "offset": 0, "length": 114, "quote": "...",
                     "content_hash": "xxh3:9fdc7830e0c0eec2", "similarity": 0.67}],
@@ -116,13 +116,18 @@ later without changing this shape).
 `found` is false when the documents do not contain the answer (the text
 is then "I could not find this in your documents.").
 
+Citation markers in `text` are `[S<number>]`, matching `number` in
+`citations`. The `S` keeps them apart from numbering inside the documents
+themselves (a contract clause "15." would otherwise read as `[15]`). A
+bare `[<number>]` is still parsed, for models that drop the letter.
+
 With `"stream": true` the response is `text/event-stream`:
 
     event: token
     data: {"text":"Every"}
 
     event: token
-    data: {"text":" 500 hours [1]."}
+    data: {"text":" 500 hours [S1]."}
 
     event: answer
     data: {...the same object as above...}

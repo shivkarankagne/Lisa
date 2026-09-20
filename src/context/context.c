@@ -18,7 +18,7 @@ static const char k_system[] =
     "- A passage's heading names the document it came from; use it to connect the question to the "
     "passage, and do not refuse because a passage omits a name the question uses.\n"
     "- If passages disagree, give each answer with its own citation and say they differ.\n"
-    "- After each fact, cite its passage number in square brackets, like [1].\n"
+    "- After each fact, cite the passage it came from in square brackets, like [S1].\n"
     "- If the passages do not contain the answer, reply exactly: " CTX_NOT_FOUND_TEXT "\n"
     "- Answer briefly, in the language of the question.";
 
@@ -146,7 +146,7 @@ static char* build_user(const ctx_state_t* st, const uint8_t* use) {
         const ctx_passage_t* p = &st->passages[i];
         if (num == 0) puts_(&b, "Passages:\n\n");
         char head[64];
-        snprintf(head, sizeof(head), "[%lld] (", (long long)++num);
+        snprintf(head, sizeof(head), "[S%lld] (", (long long)++num);
         puts_(&b, head);
         put_text(&b, p->title && p->title[0] ? p->title : base_name(p->source_path));
         if (p->page > 0) {
@@ -232,17 +232,24 @@ const ctx_stage_t ctx_default_stages[4] = {
 
 /* ---- reading the answer ----------------------------------------------- */
 
+/*
+ * Passages are labelled [S1], [S2]... in the prompt: a document's own
+ * numbering ("15. That both parties...") would otherwise be echoed as
+ * [15] and point at a passage that does not exist. A bare [1] is still
+ * accepted, since models sometimes drop the letter.
+ */
 int64_t ctx_parse_citations(const char* answer, int64_t n_passages, int32_t* out, int64_t cap) {
     if (answer == NULL || out == NULL || cap <= 0) return 0;
     int64_t n = 0;
     for (const char* s = answer; *s; s++) {
         if (*s != '[') continue;
-        /* [n], [n, m], [n,m]; anything else inside the brackets ends it. */
+        /* [S1], [S1, S2], [1]; anything else inside the brackets ends it. */
         const char* p = s + 1;
         int32_t nums[16];
         int k = 0, ok = 0;
         while (1) {
             while (*p == ' ') p++;
+            if (*p == 'S' || *p == 's') p++;
             if (*p < '0' || *p > '9') break;
             long v = 0;
             while (*p >= '0' && *p <= '9' && v < 100000) v = v * 10 + (*p++ - '0');
