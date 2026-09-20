@@ -207,6 +207,17 @@ int doc_chunk(const doc_text_t* dt, const doc_chunk_params_t* p,
         int flush = i == u.n;
         /* Measure the real span (separators included) the chunk would have. */
         if (!flush && cs >= 0 && count_chars(t, cs, u.u[i].e) > p->target_chars) flush = 1;
+        /*
+         * Prefer to end a chunk where a page ends: a chunk that runs on to
+         * the next page is cited by the page it started on, which sends
+         * the reader to the wrong page. Only once the chunk has enough
+         * text to stand on its own, so a short page does not leave a
+         * fragment.
+         */
+        if (!flush && cs >= 0 && dt->n_pages > 1 &&
+            doc_page_at(dt, u.u[i].s) != doc_page_at(dt, cs) &&
+            count_chars(t, cs, ce) >= p->target_chars / 3)
+            flush = 1;
         if (flush && cs >= 0) {
             if (n == cap) {
                 cap = cap ? cap * 2 : 64;
