@@ -39,6 +39,7 @@
 #include <stdint.h>
 
 #define LISA_STORE_FORMAT_VERSION 3   /* database format; older versions are migrated on open */
+#define LISA_STORE_VECTOR_VERSION 1   /* vector file format (independent of the database) */
 
 #define LISA_STORE_OK          0
 #define LISA_STORE_EINVAL     -1   /* invalid argument */

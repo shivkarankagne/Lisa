@@ -14,6 +14,7 @@
 #include "yyjson.h"
 #include "../app/app.h"
 #include "../app/app_json.h"
+#include "../app/log.h"
 #include "../gui/gui.h"
 #include "../http/server.h"
 #include "../platform/platform.h"
@@ -38,7 +39,11 @@ static const char k_usage[] =
     "  lisa migrate --from <v1-dir> --to <dir> [--model <id>]       convert a LISA 0.1 collection\n"
     "  lisa --version\n"
     "\n"
-    "Add --json to ingest, search, ask, or model for machine-readable output.\n"
+    "Everything runs on this computer: LISA makes no network connections except\n"
+    "its own server on 127.0.0.1, and sends nothing anywhere.\n"
+    "\n"
+    "Add --json to ingest, search, ask, or model for machine-readable output, and\n"
+    "--log-level error|warn|info|debug to any command (the log is <data>/lisa.log).\n"
     "Default data directory: ~/Library/Application Support/LISA (macOS).\n";
 
 static int exit_for(int rc) {
@@ -70,6 +75,7 @@ typedef struct {
     const char* model;
     const char* set;
     const char* token;
+    const char* log_level;
     int64_t     topk;
     int         port;
     int         json;
@@ -104,6 +110,7 @@ static int parse_args(int argc, char** argv, args_t* a) {
         else if (strcmp(s, "--model") == 0) slot = &a->model;
         else if (strcmp(s, "--set") == 0) slot = &a->set;
         else if (strcmp(s, "--token") == 0) slot = &a->token;
+        else if (strcmp(s, "--log-level") == 0) slot = &a->log_level;
         else if (strcmp(s, "--topk") == 0 || strcmp(s, "--port") == 0) {
             int64_t v;
             int is_port = s[2] == 'p';
@@ -223,7 +230,18 @@ static int cmd_ingest(app_t* app, const args_t* a) {
         yyjson_mut_obj_add_bool(doc, root, "cancelled", rc == LISA_E_CANCELLED);
         app_json_ingest_status(doc, root, &st);
         print_json(doc);
-    } else if (rc == LISA_OK || rc == LISA_E_CANCELLED) {
+    }
+    if (rc == LISA_OK || rc == LISA_E_CANCELLED) {
+        log_write(st.files_failed > 0 ? LOG_WARN : LOG_INFO,
+                  "ingest '%s': %s, %lld files seen, %lld added, %lld updated, %lld unchanged, "
+                  "%lld without text, %lld failed, %lld unsupported, %lld chunks in %.1f s",
+                  a->collection, rc == LISA_OK ? "done" : "stopped", (long long)st.files_seen,
+                  (long long)st.files_added, (long long)st.files_updated,
+                  (long long)st.files_unchanged, (long long)st.files_no_text,
+                  (long long)st.files_failed, (long long)st.files_skipped,
+                  (long long)st.chunks_added, st.elapsed_seconds);
+    }
+    if (!a->json && (rc == LISA_OK || rc == LISA_E_CANCELLED)) {
         printf("%s '%s': %lld added, %lld updated, %lld unchanged, %lld removed, %lld without text, "
                "%lld failed, %lld unsupported skipped; %lld chunks added in %.1f s\n",
                rc == LISA_OK ? "Indexed" : "Stopped indexing", a->collection,
@@ -428,9 +446,11 @@ static int cmd_serve(app_t* app, const args_t* a) {
         printf("Send it as 'Authorization: Bearer <token>'. GUI: http://127.0.0.1:%d/#token=%s\n",
                server_port(srv), server_token(srv));
         printf("Ctrl-C stops the server.\n");
+        LOG_INFO("serve: listening on 127.0.0.1:%d", server_port(srv));
         fflush(stdout);
         while (!lisa_stop_requested()) lisa_sleep_ms(200);
         printf("Stopping...\n");
+        LOG_INFO("serve: stopping");
         server_stop(srv);
     }
     lisa_model_free(chat);
@@ -566,6 +586,9 @@ int main(int argc, char** argv) {
     const char* cmd = argv[1];
     if (strcmp(cmd, "--version") == 0 || strcmp(cmd, "-V") == 0 || strcmp(cmd, "version") == 0) {
         printf("lisa %s\n", lisa_version(NULL, NULL, NULL));
+        printf("api %s, collection format %d, vector file format %d\n", LISA_VERSION_STRING,
+               LISA_COLLECTION_FORMAT_VERSION, LISA_VECTOR_FILE_VERSION);
+        printf("no telemetry; the only network socket is the local server\n");
         return EXIT_OK;
     }
     if (strcmp(cmd, "--help") == 0 || strcmp(cmd, "-h") == 0 || strcmp(cmd, "help") == 0) {
@@ -592,7 +615,17 @@ int main(int argc, char** argv) {
     const char* err = NULL;
     int rc = app_open(&app, a.data, &err);
     if (rc != LISA_OK) return fail(rc, "data directory", err);
+    int level = a.log_level ? log_level_from_name(a.log_level) : LOG_INFO;
+    if (level < 0) {
+        fprintf(stderr, "lisa: --log-level must be error, warn, info or debug\n");
+        app_close(&app);
+        return EXIT_USAGE;
+    }
+    log_open(app.data_dir, (log_level_t)level);
+    LOG_DEBUG("%s: data %s", cmd, app.data_dir);
     int code = fn(&app, &a);
+    if (code != EXIT_OK) LOG_DEBUG("%s: exit %d", cmd, code);
+    log_close();
     app_close(&app);
     return code;
 }

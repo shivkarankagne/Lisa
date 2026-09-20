@@ -10,6 +10,7 @@
 #include "civetweb.h"
 #include "yyjson.h"
 #include "../app/app_json.h"
+#include "../app/log.h"
 #include "../platform/platform.h"
 
 #define MAX_BODY        (1 << 20)
@@ -820,6 +821,8 @@ static void run_job(lisa_server_t* s, job_t* j) {
         rc = lisa_ingest_start(c, s->ingest_embed, (const char* const*)j->paths, j->n_paths, NULL, &job);
     if (rc != LISA_OK) {
         set_job(s, j, JOB_FAILED, NULL, lisa_status_string(rc));
+        LOG_WARN("ingest job %lld (%s) could not start: %s", (long long)j->id, j->name,
+                 lisa_status_string(rc));
         lisa_collection_close(c);
         return;
     }
@@ -837,6 +840,13 @@ static void run_job(lisa_server_t* s, job_t* j) {
     job_state_t final = st.state == LISA_JOB_SUCCEEDED ? JOB_SUCCEEDED
                       : st.state == LISA_JOB_CANCELLED ? JOB_CANCELLED : JOB_FAILED;
     set_job(s, j, final, &st, final == JOB_FAILED ? lisa_status_string(st.status) : NULL);
+    log_write(final == JOB_FAILED ? LOG_WARN : LOG_INFO,
+              "ingest job %lld (%s): %s, %lld files seen, %lld added, %lld updated, %lld unchanged, "
+              "%lld without text, %lld failed, %lld chunks in %.1f s",
+              (long long)j->id, j->name, k_job_state[final], (long long)st.files_seen,
+              (long long)st.files_added, (long long)st.files_updated, (long long)st.files_unchanged,
+              (long long)st.files_no_text, (long long)st.files_failed, (long long)st.chunks_added,
+              st.elapsed_seconds);
 }
 
 static void worker(void* arg) {

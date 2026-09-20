@@ -56,3 +56,7 @@ build/lisa_asan
 
 # Locally built dependencies (scripts/build_pdfium.sh)
 /.deps/
+
+# Release packaging (scripts/release.sh)
+/build-release/
+/dist/

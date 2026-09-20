@@ -58,6 +58,14 @@ extern "C" {
 #define LISA_VERSION_STRING "0.6.0"
 
 /*
+ * The on-disk formats this build reads and writes: the collection
+ * database (docs/formats/collection-v2.md) and the vector file. An older
+ * LISA refuses a newer collection; a newer LISA migrates an older one.
+ */
+#define LISA_COLLECTION_FORMAT_VERSION 3
+#define LISA_VECTOR_FILE_VERSION       1
+
+/*
  * Version of the linked library (may differ from the header's macros if
  * a program is linked against another build). Any out pointer may be NULL.
  * Returns the version string, e.g. "0.1.0".

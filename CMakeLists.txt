@@ -203,6 +203,7 @@ endif()
 add_library(lisa_app STATIC
     src/app/app.c
     src/app/app_json.c
+    src/app/log.c
     src/http/server.c
 )
 target_link_libraries(lisa_app PUBLIC lisa_core lisa_yyjson lisa_civetweb)

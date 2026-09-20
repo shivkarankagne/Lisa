@@ -17,7 +17,7 @@
 #define VEC_HEADER_SIZE  64
 #define VEC_MAGIC        "LISAVECT"
 #define VEC_BOM          0x01020304u
-#define VEC_FORMAT       1        /* vector file format (independent of the database format) */
+#define VEC_FORMAT       LISA_STORE_VECTOR_VERSION   /* vector file format (store.h) */
 #define MAX_DIM          65536
 #define MIGRATE_BATCH    4096
 #define DEAD_ID          UINT64_MAX

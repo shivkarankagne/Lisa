@@ -1,133 +1,129 @@
 # LISA
 
-LISA (Low-level Intelligent Search Accelerator) is a native, local AI
-infrastructure runtime.
+**Ask your own documents questions, on your own computer.**
 
-Current state: the retrieval engine and a minimal persistent storage layer.
+LISA is one file. Point it at a folder of documents, ask a question in
+plain language, and get an answer with citations to the exact passages
+it came from. No Python, no Docker, no database server, no account, no
+internet.
+
+    $ lisa ask --collection manuals "How often must the pump bearings be inspected?"
+    Every 500 hours [1].
+
+    Sources:
+      [1] /Users/you/Documents/manuals/maintenance.pdf, page 12
+
+Everything happens on your machine: your documents, the search index,
+and the model. LISA makes no network connections except its own server
+on `127.0.0.1`, and sends nothing anywhere.
+
+Status: **0.6.0, pre-release.** Apple Silicon Macs (macOS 13+). The work
+left before 1.0 is in `LISA_COMPLETION_PLAN.md`.
 
 ---
 
-## What is implemented
+## Quickstart (about five minutes, most of it downloading a model)
 
-| Module | Status |
-| :--- | :--- |
-| Module 0 — Platform / Build | Single-binary build target (Makefile) |
-| Module 4 — Kernels | ARM64 NEON L2 distance kernel |
-| Module 5 — Retrieval Engine | Complete |
-| Module 6 — Storage Engine | create / open / get / insert / delete / close |
-| Module 13 — CLI | Search by index file or by storage collection |
-| Module 13 — HTTP API | Read-only, localhost only, no TLS/auth |
+**1. Get `lisa`.** Download the binary for Apple Silicon from
+[Releases](https://github.com/shivkarankagne/Lisa/releases), or build it
+(below). Until the binary is signed, macOS asks the first time:
+right-click it in Finder → **Open** → **Open**.
 
-Other modules (Runtime, Memory, Tensor, Documents, Embeddings, Model,
-Inference, Context, RAG/Agents, Security) are not started.
+    chmod +x lisa
+    ./lisa --version
+
+**2. Get the models** (about 3 GB, once). LISA answers with a chat model
+and searches with an embedding model:
+
+    mkdir -p ~/lisa-models && cd ~/lisa-models
+    curl -L -O https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf
+    curl -L -O https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/370f27d7550e0def9b39c1f16d3fbaa13aa67728/Qwen3-Embedding-0.6B-Q8_0.gguf
+    lisa model --set ~/lisa-models/Qwen3-4B-Q4_K_M.gguf
+    lisa model --set ~/lisa-models/Qwen3-Embedding-0.6B-Q8_0.gguf
+    lisa model            # shows both files and verifies them (SHA-256)
+
+**3. Add documents** (`.txt`, `.md`, `.pdf`, `.docx`; scanned PDFs are
+read with text recognition):
+
+    lisa ingest --collection manuals ~/Documents/manuals
+
+**4. Ask:**
+
+    lisa ask --collection manuals "What is the warranty period?"
+
+**Or use the window:**
+
+    lisa gui
+
+Drop a folder on it, type your question, click a citation to read the
+passage it came from.
 
 ---
 
-## Build
+## What it does
 
-Requires CMake 3.20+ and Xcode on an ARM64 Mac. Get the prebuilt static
-PDFium once (downloaded and SHA-256 verified; not committed):
+- **Reads** text, Markdown, PDF and Word files, including scanned PDFs
+  (text recognition on macOS).
+- **Searches** by meaning and by keyword together, so exact terms like
+  part numbers work as well as questions in plain language.
+- **Answers** with citations: file, page, and the quoted passage. If your
+  documents do not contain the answer, it says so instead of guessing.
+- **Keeps up to date**: re-running `ingest` re-reads only changed files
+  and drops files you deleted.
+- **Works offline**, always. Turn off Wi-Fi and nothing changes.
+- **Speaks many languages**, including Hindi and other Indian languages
+  in text documents.
 
-    scripts/fetch_pdfium.sh
+Three ways in, all the same engine: the command line, a desktop window,
+and a local HTTP API (`docs/http-api.md`) for your own scripts.
 
-(`scripts/build_pdfium.sh` rebuilds it from source; needed only to
-upgrade PDFium.)
+## Where your data lives
 
+    ~/Library/Application Support/LISA/
+      config.json            which model files to use
+      collections/<name>/    the index for one set of documents
+      lisa.log               what LISA did (never your document text)
+
+Your original files are never modified or copied; LISA stores extracted
+text and vectors in the collection. Use `--data <dir>` for a different
+location, and delete a collection folder to remove it.
+
+## Build from source
+
+Apple Silicon Mac, CMake 3.20+, Xcode command line tools.
+
+    scripts/fetch_pdfium.sh          # once: prebuilt static PDFium (SHA-256 verified)
     cmake -S . -B build
-    cmake --build build
-
-Produces one native executable:
-
-    build/lisa
-
-Run the test suite (builds every test from source):
-
+    cmake --build build -j8
     ctest --test-dir build --output-on-failure
 
-Sanitizer build (ASan + UBSan):
+`build/lisa` links only macOS system libraries; everything else
+(SQLite, llama.cpp, PDFium, CivetWeb, yyjson, miniz, webview, md4c,
+utf8proc) is statically linked. Model tests need the model files; they
+report as ignored without them.
 
-    cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug -DLISA_SANITIZE=ON
-    cmake --build build-asan
-    ctest --test-dir build-asan --output-on-failure
+## Documentation
 
----
+| | |
+| :--- | :--- |
+| Command line | [src/cli/README.md](src/cli/README.md) |
+| HTTP API | [docs/http-api.md](docs/http-api.md) |
+| Models (and how to verify them) | [docs/models.md](docs/models.md) |
+| Collection format | [docs/formats/collection-v2.md](docs/formats/collection-v2.md) |
+| Plan and decisions | [LISA_COMPLETION_PLAN.md](LISA_COMPLETION_PLAN.md) |
+| Reports for each work package | `LISA_REPORT_AND_UPDATE_*.md` |
+| Security | [SECURITY.md](SECURITY.md) |
+| Contributing | [CONTRIBUTING.md](CONTRIBUTING.md) |
 
-## Usage
+## Licence
 
-Search a binary index file:
+Source-available under the **Business Source License 1.1** (see
+[LICENSE](LICENSE)): free for individuals' personal use; organisations
+need a commercial licence; each version becomes Apache-2.0 /
+GPL-2.0-or-later four years after its release.
 
-    lisa --index vectors.bin --dim 768 --topk 5 --query query.txt
+> The licence text is a draft and has not yet been reviewed by a lawyer.
+> If you plan to rely on it, ask first: open an issue.
 
-Search a storage collection:
-
-    lisa --collection /path/to/collection --topk 5 --query query.txt
-
-Both produce the same output format:
-
-    <index> <distance>
-
-See `src/cli/README.md` for the full CLI contract, including exit codes.
-
----
-
-## Layout
-
-    src/
-      cli/              CLI entry point
-      retrieval/        scalar reference + public API
-      storage/          persistent local collection
-      kernels/arm64/    NEON assembly kernel + wrapper
-    tests/              test suite
-    benchmark/          benchmark harness
-    build/              build output (not committed)
-
----
-
-## Baseline
-
-Measured on Apple M2, 10,000 vectors, dim 768, k=5, 100 queries, gcc -O2,
-single-threaded, warm cache:
-
-| Implementation | mean | min | max |
-| :--- | :--- | :--- | :--- |
-| Scalar reference | 5.644 ms | 5.575 ms | 6.204 ms |
-| ARM64 NEON kernel | 1.644 ms | 1.620 ms | 1.650 ms |
-
-3.43x speedup, assembly over this project's own scalar reference.
-
-This is not a comparison against any other vector search engine. No such
-comparison has been run for this codebase. Do not cite one until it has.
-
-Full conditions, methodology, and known limitations are recorded in
-`LISA_REPORT_AND_UPDATE_001.md`. Do not change benchmark conditions or
-claim new numbers without a separate measured package.
-
----
-
-## License
-
-Business Source License 1.1 (source-available). **Free for individuals**
-for their own personal use. **Organizations** — companies, banks,
-government, institutions, non-profits — need a commercial license. Each
-version becomes Apache-2.0 / GPL-2.0-or-later four years after release.
-See [LICENSE](LICENSE) and [NOTICE](NOTICE).
-
----
-
-*Built by LISA.*
-
----
-
-## HTTP API
-
-Start the read-only API:
-
-    lisa --serve --port 8080
-
-Endpoints:
-
-    GET  /health
-    POST /search?collection=<dir>&topk=<n>
-
-See `src/cli/README.md` for the full contract. The server binds to
-127.0.0.1 only. No TLS, no authentication.
+Third-party components keep their own licences
+([third_party/README.md](third_party/README.md), `NOTICE`).

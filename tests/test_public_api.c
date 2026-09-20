@@ -15,6 +15,7 @@
 #include "unity.h"
 #include "lisa.h"
 #include "../src/storage/storage.h"   /* only to build a v1 fixture */
+#include "../src/storage/store.h"     /* only to check the published format versions */
 
 #define DIM 6
 #define MODEL "api-test-model"
@@ -452,6 +453,12 @@ static void test_auth_and_routes_are_installed(void) {
     lisa_context_destroy(ctx);
 }
 
+static void test_published_format_versions(void) {
+    /* What lisa.h tells programs must be what the storage layer writes. */
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_FORMAT_VERSION, LISA_COLLECTION_FORMAT_VERSION);
+    TEST_ASSERT_EQUAL_INT(LISA_STORE_VECTOR_VERSION, LISA_VECTOR_FILE_VERSION);
+}
+
 static void test_migrate_v1(void) {
     lisa_context_t* ctx = NULL;
     TEST_ASSERT_EQUAL_INT(LISA_OK, lisa_context_create(NULL, &ctx));
@@ -503,6 +510,7 @@ int main(int argc, char** argv) {
     RUN_TEST(test_audit_sink);
     RUN_TEST(test_storage_crypto_refuses_until_supported);
     RUN_TEST(test_auth_and_routes_are_installed);
+    RUN_TEST(test_published_format_versions);
     RUN_TEST(test_migrate_v1);
     return UNITY_END() == 0 ? 0 : 1;
 }
