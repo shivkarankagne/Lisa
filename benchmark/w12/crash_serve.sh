@@ -14,7 +14,12 @@ set -u
 
 TRIALS=${1:-5}
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
-CORPUS=${2:-$ROOT/benchmark/w0/corpus/synthetic}
+# The whole corpus, so indexing lasts long enough to be interrupted part
+# way through. The kill is timed by watching the job, not by a sleep:
+# the small folder alone finishes in a couple of seconds, and a test that
+# kills an already-finished job proves nothing.
+CORPUS=${2:-$ROOT/benchmark/w0/corpus}
+SMALL=$ROOT/benchmark/w0/corpus/synthetic
 BIN=$ROOT/build/lisa
 PORT=${PORT:-8732}
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/lisa_crash.XXXXXX")
@@ -54,17 +59,43 @@ for trial in $(seq "$TRIALS"); do
     echo "--- trial $trial"
     start_server || { fail=$((fail + 1)); continue; }
 
-    # Ingest creates the collection; there is no separate create route.
+    # Index the small folder first and let it finish, so there are
+    # documents to lose. Then start the long job that gets interrupted.
+    api POST "/v1/collections/crash/ingest" "{\"paths\":[\"$SMALL\"]}" > /dev/null 2>&1
+    for _ in $(seq 240); do
+        state=$(api GET "/v1/jobs" 2>/dev/null | python3 -c \
+            "import json,sys; j=json.load(sys.stdin).get('jobs',[]); print(j[0]['state'] if j else 'none')" \
+            2>/dev/null || echo none)
+        [ "$state" = "running" ] || [ "$state" = "queued" ] || break
+        sleep 1
+    done
     api POST "/v1/collections/crash/ingest" "{\"paths\":[\"$CORPUS\"]}" > "$WORK/job.json" 2>/dev/null
 
-    # Kill somewhere inside the indexing run, not before it starts.
-    sleep $(( (RANDOM % 8) + 3 ))
-    before=$(api GET "/v1/collections/crash/documents" 2>/dev/null | python3 -c \
-        "import json,sys; print(json.load(sys.stdin).get('readable', 0))" 2>/dev/null || echo 0)
+    # Wait for the job to be running with at least one document committed,
+    # then kill it there. Give up on the trial if it finished first.
+    before=0
+    state=queued
+    for _ in $(seq 600); do
+        before=$(api GET "/v1/collections/crash/documents" 2>/dev/null | python3 -c \
+            "import json,sys; print(json.load(sys.stdin).get('readable', 0))" 2>/dev/null || echo 0)
+        state=$(api GET "/v1/jobs" 2>/dev/null | python3 -c \
+            "import json,sys; j=json.load(sys.stdin).get('jobs',[]); print(j[0]['state'] if j else 'none')" \
+            2>/dev/null || echo none)
+        [ "$before" -ge 1 ] && [ "$state" = "running" ] && break
+        # shellcheck disable=SC2015
+        [ "$state" = "succeeded" ] || [ "$state" = "failed" ] && break
+        sleep 0.2
+    done
+    if [ "$state" != "running" ]; then
+        echo "    SKIP: job reached '$state' before it could be interrupted"
+        kill -9 "$SPID" 2>/dev/null; wait "$SPID" 2>/dev/null; SPID=
+        rm -rf "$WORK/data"
+        continue
+    fi
     kill -9 "$SPID" 2>/dev/null
     wait "$SPID" 2>/dev/null
     SPID=
-    echo "    killed after $before documents were readable"
+    echo "    killed mid-index, $before documents committed"
 
     # It must come straight back up, with no repair step by hand.
     start_server || { echo "    FAIL: did not restart"; fail=$((fail + 1)); continue; }
@@ -81,8 +112,9 @@ for trial in $(seq "$TRIALS"); do
         echo "    $after documents after restart"
     fi
 
-    # Indexing the same folder again must finish and leave it usable.
-    api POST "/v1/collections/crash/ingest" "{\"paths\":[\"$CORPUS\"]}" > /dev/null 2>&1
+    # Indexing must still work after the recovery. The small folder is
+    # used here so the trial does not re-index the whole corpus.
+    api POST "/v1/collections/crash/ingest" "{\"paths\":[\"$SMALL\"]}" > /dev/null 2>&1
     for _ in $(seq 120); do
         state=$(api GET "/v1/jobs" 2>/dev/null | python3 -c \
             "import json,sys; j=json.load(sys.stdin).get('jobs',[]); print(j[0]['state'] if j else 'none')" \
