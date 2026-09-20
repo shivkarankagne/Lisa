@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "unity.h"
@@ -41,6 +42,14 @@ void tearDown(void) {}
  * g_body. extra: additional header lines ("Name: value\r\n"), or NULL.
  * auth: 1 to send the right token.
  */
+/*
+ * When set, the body is read until this text appears rather than until
+ * the connection closes. A streamed answer arrives over minutes on a
+ * slow machine, and mg_read gives up after CivetWeb's 30 s client
+ * timeout with no way to tell that apart from the end of the body.
+ */
+static const char* g_read_until = NULL;
+
 static int http_at(int port, const char* method, const char* path, const char* extra, int auth,
                    const char* body) {
     char ebuf[256];
@@ -76,9 +85,18 @@ static int http_at(int port, const char* method, const char* path, const char* e
             snprintf(g_type, sizeof(g_type), "%s", ri->http_headers[i].value);
     }
     size_t len = 0;
-    int n;
-    while (len + 1 < sizeof(g_body) && (n = mg_read(c, g_body + len, sizeof(g_body) - 1 - len)) > 0)
-        len += (size_t)n;
+    time_t deadline = time(NULL) + 600;
+    while (len + 1 < sizeof(g_body)) {
+        int n = mg_read(c, g_body + len, sizeof(g_body) - 1 - len);
+        if (n > 0) {
+            len += (size_t)n;
+            continue;
+        }
+        g_body[len] = '\0';
+        if (g_read_until == NULL || strstr(g_body, g_read_until) != NULL) break;
+        if (time(NULL) >= deadline) break;
+        usleep(100000);   /* the model is still generating */
+    }
     g_body[len] = '\0';
     mg_close_connection(c);
     return status;
@@ -86,6 +104,14 @@ static int http_at(int port, const char* method, const char* path, const char* e
 
 static int http(const char* method, const char* path, const char* extra, int auth, const char* body) {
     return http_at(g_port, method, path, extra, auth, body);
+}
+
+/* As http(), but reads the body until `until` appears. */
+static int http_stream(const char* method, const char* path, const char* body, const char* until) {
+    g_read_until = until;
+    int rc = http_at(g_port, method, path, NULL, 1, body);
+    g_read_until = NULL;
+    return rc;
 }
 
 /* Value of a top-level (or "a.b") string field in g_body, or "". */
@@ -405,8 +431,9 @@ static void test_ingest_search_ask(void) {
     TEST_ASSERT_NOT_NULL(strstr(g_body, "\"citations\":[{"));
     TEST_ASSERT_NOT_NULL(strstr(g_body, "pump.txt"));
 
-    TEST_ASSERT_EQUAL_INT(200, http("POST", "/v1/collections/plant/ask", NULL, 1,
-                                    "{\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"Why did pump P-7 fail?\"}]}"));
+    TEST_ASSERT_EQUAL_INT(200, http_stream("POST", "/v1/collections/plant/ask",
+                                           "{\"stream\":true,\"messages\":[{\"role\":\"user\",\"content\":\"Why did pump P-7 fail?\"}]}",
+                                           "event: answer\ndata: {\"text\":"));
     TEST_ASSERT_NOT_NULL(strstr(g_body, "event: token\ndata: {\"text\":"));
     TEST_ASSERT_NOT_NULL(strstr(g_body, "event: answer\ndata: {\"text\":"));
 

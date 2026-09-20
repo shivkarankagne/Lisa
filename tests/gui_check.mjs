@@ -39,6 +39,9 @@ const check = (name, ok, detail) => {
   else { fail++; console.log("  FAIL: " + name + (detail ? ": " + detail : "")); }
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/* Indexing and answering run on the CPU on a CI machine, where they take
+ * tens of minutes rather than seconds. */
+const MODEL_MS = Number(process.env.LISA_GUI_MODEL_MS || 900000);
 
 // ---- start Chrome and connect ---------------------------------------------------
 const profile = mkdtempSync(join(tmpdir(), "lisa-gui-chrome-"));
@@ -165,7 +168,7 @@ try {
     await js(`document.getElementById('add-coll').value = 'guitest';
               document.getElementById('add-path').value = ${JSON.stringify(docsDir)};
               document.getElementById('add-form').requestSubmit(); true`);
-    const done = await waitFor("document.getElementById('job-text').textContent.startsWith('Done')", 300000);
+    const done = await waitFor("document.getElementById('job-text').textContent.startsWith('Done')", MODEL_MS);
     check("adding a folder finishes with a summary", done, await js("document.getElementById('job-text').textContent"));
     /* The list is reloaded after the job summary appears, so this waits. */
     check("new collection listed and selected",
@@ -174,7 +177,7 @@ try {
     // ---- ask ----------------------------------------------------------------------------
     await js(`document.getElementById('question').value = 'Why did pump P-7 fail?';
               document.getElementById('ask-form').requestSubmit(); true`);
-    const answered = await waitFor("document.querySelectorAll('#sources li').length > 0 || document.getElementById('answer-text').classList.contains('notfound')", 300000);
+    const answered = await waitFor("document.querySelectorAll('#sources li').length > 0 || document.getElementById('answer-text').classList.contains('notfound')", MODEL_MS);
     check("answer arrives", answered, await js("document.getElementById('answer-meta').textContent"));
     const text = await js("document.getElementById('answer-text').textContent");
     check("answer is about the bearing", /bearing/i.test(text), text);
