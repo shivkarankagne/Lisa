@@ -60,3 +60,8 @@ build/lisa_asan
 # Release packaging (scripts/release.sh)
 /build-release/
 /dist/
+
+# W0/W12 benchmark: the corpus is downloaded and generated, results are local
+/benchmark/w0/corpus/
+/benchmark/w0/data-*/
+/benchmark/w0/results-*.json
