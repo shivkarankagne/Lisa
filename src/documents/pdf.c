@@ -88,6 +88,8 @@ static char* meta_title(FPDF_DOCUMENT doc) {
 #define OCR_MIN_CHARS 16
 /* Render scanned pages at this many pixels on the long side for OCR. */
 #define OCR_LONG_SIDE 2000
+/* Above this share of unmapped glyphs, the text layer is not trustworthy. */
+#define OCR_MAX_UNMAPPED_PERCENT 2
 
 static int64_t visible_chars(const char* s, int64_t n) {
     int64_t k = 0;
@@ -166,7 +168,22 @@ int doc_extract_pdf(const char* path, doc_text_t* out) {
                 int got = FPDFText_GetText(tp, 0, n, u16);  /* includes the terminator */
                 char* pt = NULL;
                 int64_t pl = 0;
-                if (got > 1) rc = utf16_to_doc(u16, got - 1, &pt, &pl);
+                /*
+                 * A font without a Unicode mapping makes PDFium emit
+                 * U+FFFE for those glyphs: the page looks like text but
+                 * words come out broken ("ve moves" for "five moves").
+                 * Past a few per cent, recognise the page instead.
+                 */
+                int32_t unmapped = 0;
+                for (int t = 0; t + 1 < got; t++) {
+                    if (u16[t] == 0xFFFE || u16[t] == 0xFFFD) unmapped++;
+                }
+                if (got > 1 && unmapped * 100 > (got - 1) * OCR_MAX_UNMAPPED_PERCENT &&
+                    lisa_ocr_available()) {
+                    n = 0;   /* fall through to recognition below */
+                } else if (got > 1) {
+                    rc = utf16_to_doc(u16, got - 1, &pt, &pl);
+                }
                 if (rc == DOC_OK && visible_chars(pt, pl) >= OCR_MIN_CHARS)
                     rc = append(&text, &len, &cap, pt, pl);
                 else if (rc == DOC_OK) {

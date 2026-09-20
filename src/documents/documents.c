@@ -166,6 +166,25 @@ static int sink_cp(sink_t* s, int32_t cp) {
         return sink_bytes(s, &c, 1);
     }
     if (cp < 0x20 || cp == 0x7F || (cp >= 0x80 && cp <= 0x9F) || cp == 0xFEFF) return DOC_OK;
+    /*
+     * Typeset PDFs write "fi" and "fl" as single ligature characters, and
+     * break words with a soft hyphen. Left alone, "five" is stored as
+     * "ﬁve" and never matches a search for "five".
+     */
+    if (cp >= 0xFB00 && cp <= 0xFB04) {
+        static const char* const k_lig[] = { "ff", "fi", "fl", "ffi", "ffl" };
+        const char* t = k_lig[cp - 0xFB00];
+        return sink_bytes(s, t, (int64_t)strlen(t));
+    }
+    if (cp == 0x00AD) return DOC_OK;                       /* soft hyphen */
+    /*
+     * A glyph the font does not map to Unicode. In Latin PDFs these are
+     * nearly always the f-ligatures, and "fi" is by far the most common:
+     * writing it back turns "\uFFFEve moves" into "five moves" instead of
+     * losing the word. A page with many of them is recognised instead
+     * (src/documents/pdf.c), which gets even "fl" and "ff" right.
+     */
+    if (cp == 0xFFFE || cp == 0xFFFF) return sink_bytes(s, "fi", 2);
     if (!utf8proc_codepoint_valid(cp)) cp = 0xFFFD;
     utf8proc_uint8_t buf[4];
     utf8proc_ssize_t n = utf8proc_encode_char(cp, buf);
