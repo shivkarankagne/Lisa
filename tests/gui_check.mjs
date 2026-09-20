@@ -14,13 +14,21 @@ import { join } from "node:path";
 
 const [url, docsDir, shotsDir] = process.argv.slice(2);
 const withModels = process.argv.includes("--models");
-const chrome = process.env.CHROME || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+/* Any Chromium browser will do: they all speak the DevTools protocol. */
+const CHROMIUMS = [
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+  "/Applications/Chromium.app/Contents/MacOS/Chromium",
+  "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+  "/usr/bin/chromium", "/usr/bin/google-chrome",
+];
+const chrome = process.env.CHROME || CHROMIUMS.find((p) => existsSync(p));
 if (!url || !docsDir || !shotsDir) {
   console.error("usage: node gui_check.mjs <url> <docs-dir> <shots-dir> [--models]");
   process.exit(2);
 }
-if (!existsSync(chrome)) {
-  console.log("SKIP: Chrome not found at " + chrome);
+if (!chrome || !existsSync(chrome)) {
+  console.log("SKIP: no Chromium browser found (set CHROME=/path/to/browser)");
   process.exit(77);
 }
 
@@ -86,10 +94,12 @@ const js = async (expr) => {
   if (r.exceptionDetails) throw new Error(r.exceptionDetails.exception?.description || "evaluation failed");
   return r.result.value;
 };
+/* Errors are retried, not raised: during a navigation the expression can
+ * still run against the old document, where the elements do not exist. */
 const waitFor = async (expr, ms) => {
   const end = Date.now() + ms;
   while (Date.now() < end) {
-    if (await js(expr)) return true;
+    try { if (await js(expr)) return true; } catch (_) {}
     await sleep(200);
   }
   return false;
@@ -107,6 +117,7 @@ await send("Page.enable");
 try {
   // ---- load --------------------------------------------------------------------------
   await send("Page.navigate", { url });
+  await waitFor("document.readyState === 'complete' && !!document.getElementById('setup')", 10000);
   /* A fresh data directory shows the first-run folder panel. */
   check("first run offers folders to watch", await waitFor("!document.getElementById('setup').hidden", 10000));
   check("suggested folders listed",
@@ -156,8 +167,9 @@ try {
               document.getElementById('add-form').requestSubmit(); true`);
     const done = await waitFor("document.getElementById('job-text').textContent.startsWith('Done')", 300000);
     check("adding a folder finishes with a summary", done, await js("document.getElementById('job-text').textContent"));
+    /* The list is reloaded after the job summary appears, so this waits. */
     check("new collection listed and selected",
-          await js("!!document.querySelector('#collections button[data-name=\"guitest\"][aria-current=\"true\"]')"));
+          await waitFor("!!document.querySelector('#collections button[data-name=\"guitest\"][aria-current=\"true\"]')", 10000));
 
     // ---- ask ----------------------------------------------------------------------------
     await js(`document.getElementById('question').value = 'Why did pump P-7 fail?';
