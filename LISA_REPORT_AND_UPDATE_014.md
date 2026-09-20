@@ -29,6 +29,7 @@ the fixes.
 | 8 | Metal out of memory reported as a successful empty answer | `produced == 0` was `LM_OK` | `src/models/models.c` returns `LM_ERUNTIME`; the CLI adds "another AI app may be holding the GPU" |
 | 9 | Citations pointed at nothing | Documents number their own clauses ("15. That both parties…") and the model echoed `[15]` | Passages are labelled `[S1]`, `[S2]`… in the prompt; `ctx_parse_citations` accepts `[S1]` and a bare `[1]`; the CLI and the GUI render `[S<n>]` |
 | 10 | A second `lisa` window talked to the first one's data | No record of a running instance | `<data>/server.json` with a pid check (`app_server_announce/running/forget`) |
+| 11 | "What is the capital of France?" answered "Paris", citing an unrelated book page | The passage scored 0.39, above the 0.25 floor, and the model answered from its own knowledge | `src/context/context.c`: the refusal rule now applies to facts the model is sure of, and it is asked to check its answer's words appear in a passage |
 
 ## 3. Interface changes
 
@@ -50,7 +51,9 @@ the fixes.
 | Company CIN | not found | correct |
 | Writ petition subject | not found | correct |
 | Question about a scanned book | not found | answered with a page citation |
-| Question the documents do not answer | refused | refused (unchanged) |
+| Who wrote a book in the collection | not found | "Charles Saatchi", cited |
+| "What is the capital of France?" | "Paris.", citing an unrelated page | refused |
+| "What is the boiling point of water?" | — | refused |
 
 ## 5. Not done
 
