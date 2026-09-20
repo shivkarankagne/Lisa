@@ -41,8 +41,10 @@ W1 → W2 → W3 → W4, W5 (parallel) → W6, W7 → W8 → W9 → W10 → W5b,
 W5b (docx + OCR of scanned PDFs) was moved into 1.0 from §8 L3 by the
 user on 2026-09-19 (plan decision 16).
 
-W1–W9 are done (reports `LISA_REPORT_AND_UPDATE_002.md`–`_010.md`);
-next is **W10** (GUI; W11 may run in parallel). Check the plan's acceptance criteria for the package you
+W1–W11 are done (reports `LISA_REPORT_AND_UPDATE_002.md`–`_013.md`),
+except code signing in W11 (needs an Apple Developer ID). Next are
+**W0** (competitor baseline) and **W12** (validation), then the polish
+list in report 012 §6. Check the plan's acceptance criteria for the package you
 are on; a package is not done until every criterion is met.
 
 ## Non-negotiable rules
