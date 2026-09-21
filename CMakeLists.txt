@@ -75,10 +75,17 @@ add_compile_options(
 
 # ---- platform / architecture -------------------------------------------
 
-if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64|ARM64)$")
+# ARM64 (Apple Silicon) is the 1.0 target (plan decision 10). x86-64 is
+# allowed for the Linux port (decision 20): the scalar kernel is the
+# portable reference, so the NEON/assembly paths simply are not built
+# there. Any other architecture is untested and refused.
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64|ARM64)$")
+    set(LISA_ARCH_ARM64 ON)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
+    set(LISA_ARCH_X86_64 ON)
+else()
     message(FATAL_ERROR
-        "LISA 1.0 targets ARM64 only (plan decision 10). "
-        "Detected: ${CMAKE_SYSTEM_PROCESSOR}")
+        "LISA supports ARM64 and x86-64. Detected: ${CMAKE_SYSTEM_PROCESSOR}")
 endif()
 
 # ---- third-party (see third_party/README.md) ---------------------------
