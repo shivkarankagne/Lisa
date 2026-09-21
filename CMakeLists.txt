@@ -13,7 +13,13 @@
 #   ctest --test-dir build-asan --output-on-failure
 
 cmake_minimum_required(VERSION 3.20)
-project(lisa VERSION 0.6.0 LANGUAGES C CXX ASM OBJC)
+# Objective-C is only used on macOS (platform_macos.m, Apple Vision OCR).
+# Other toolchains (e.g. gcc on Linux) have no Objective-C compiler, so
+# enabling it unconditionally fails configuration there.
+project(lisa VERSION 0.6.0 LANGUAGES C CXX ASM)
+if(APPLE)
+    enable_language(OBJC)
+endif()
 
 option(LISA_SANITIZE         "Build with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
 option(LISA_BUILD_TESTS      "Build tests"      ON)
