@@ -88,3 +88,34 @@ jobs:
             echo "error: build/lisa links a non-system library"
             exit 1
           fi
+
+  # First step of the Linux port (plan W13): prove the core is portable by
+  # building and testing it on real Linux. No GPU, no PDFium, no models
+  # yet — those tests skip themselves. It confirms the platform layer,
+  # kernels, storage, retrieval and context compile and pass off macOS.
+  linux-x64:
+    name: Linux x64 (headless, no PDF/models)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          uname -m
+          cc --version
+          cmake --version
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DLISA_REQUIRE_PDF=OFF -DLISA_MODELS_DIR=/nonexistent
+
+      - name: Build
+        run: cmake --build build -j "$(nproc)"
+
+      - name: Test (model-, PDF- and GUI-free tests run; the rest skip)
+        run: ctest --test-dir build --output-on-failure --timeout 900
+
+      - name: Runtime smoke check
+        run: |
+          ./build/lisa --version
+          ldd build/lisa || true

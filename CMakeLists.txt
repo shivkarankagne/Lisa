@@ -52,8 +52,13 @@ foreach(opt LLAMA_BUILD_COMMON LLAMA_BUILD_TESTS LLAMA_BUILD_TOOLS
             LLAMA_BUILD_UI GGML_NATIVE GGML_OPENMP GGML_CCACHE)
     set(${opt} OFF CACHE BOOL "" FORCE)
 endforeach()
-set(GGML_METAL               ON CACHE BOOL "" FORCE)
-set(GGML_METAL_EMBED_LIBRARY ON CACHE BOOL "" FORCE)
+# Metal is Apple's GPU backend. On other platforms llama.cpp falls back
+# to its portable CPU backend, which is all a headless Linux build needs
+# for now; a GPU backend (CUDA, Vulkan) is a later, separate choice.
+if(APPLE)
+    set(GGML_METAL               ON CACHE BOOL "" FORCE)
+    set(GGML_METAL_EMBED_LIBRARY ON CACHE BOOL "" FORCE)
+endif()
 add_subdirectory(third_party/llama.cpp EXCLUDE_FROM_ALL)
 
 # LISA's own code: warnings on.
@@ -170,7 +175,6 @@ add_library(lisa_core STATIC
     src/platform/platform_posix.c
     src/kernels/registry.c
     src/kernels/kernels_scalar.c
-    src/kernels/arm64/l2_neon.c
     src/retrieval/retrieval_scalar.c
     src/retrieval/retrieval_search.c
     src/retrieval/fusion.c
@@ -180,15 +184,35 @@ add_library(lisa_core STATIC
     src/context/context.c
     src/storage/storage.c
     src/storage/store.c
-    src/kernels/arm64/lisa_asm_wrapper.c
-    src/kernels/arm64/lisa_ultra_mac.s
 )
+
+# NEON is ARM-only; its source is self-guarded but need not be fed to a
+# non-ARM compiler at all. The assembly kernel is Apple-ARM64 only and is
+# a test-only path (plan D2), so it is excluded everywhere else.
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+    target_sources(lisa_core PRIVATE src/kernels/arm64/l2_neon.c)
+    if(APPLE)
+        target_sources(lisa_core PRIVATE
+            src/kernels/arm64/lisa_asm_wrapper.c
+            src/kernels/arm64/lisa_ultra_mac.s)
+        set(LISA_HAVE_ASM_KERNEL ON)
+    endif()
+endif()
+# Where the assembly kernel is absent, its test-only entry point is
+# provided by a scalar stand-in so the differential tests still link.
+if(NOT LISA_HAVE_ASM_KERNEL)
+    target_sources(lisa_core PRIVATE src/kernels/search_asm_portable.c)
+endif()
 target_include_directories(lisa_core PUBLIC include src)
 target_link_libraries(lisa_core PUBLIC lisa_sqlite m PRIVATE llama vendor::hash lisa_md4c lisa_utf8proc lisa_miniz)
 if(APPLE)
+    # macOS: the folder picker, drag-drop, and Apple Vision OCR.
     target_sources(lisa_core PRIVATE src/platform/platform_macos.m)
     set_source_files_properties(src/platform/platform_macos.m PROPERTIES COMPILE_OPTIONS "-fno-objc-arc")
     target_link_libraries(lisa_core PUBLIC "-framework Cocoa" "-framework Vision")
+else()
+    # No system recogniser: scanned pages are reported as having no text.
+    target_sources(lisa_core PRIVATE src/platform/platform_ocr_none.c)
 endif()
 if(LISA_HAVE_PDFIUM)
     target_sources(lisa_core PRIVATE src/documents/pdf.c)
@@ -245,12 +269,17 @@ if(LISA_BUILD_TESTS)
     endfunction()
 
     lisa_c_test(test_retrieval)
-    lisa_c_test(test_retrieval_asm)
     lisa_c_test(test_edge_cases)
     lisa_c_test(test_storage)
     lisa_c_test(test_storage_mutation)
-    lisa_c_test(test_kernel_abi tests/kernel_abi_probe.s)
     lisa_c_test(test_kernels)
+    # These exercise the assembly kernel itself, so they run only where it
+    # is built (Apple ARM64). Elsewhere the differential tests above use
+    # the scalar stand-in for lisa_search_exact_asm.
+    if(LISA_HAVE_ASM_KERNEL)
+        lisa_c_test(test_retrieval_asm)
+        lisa_c_test(test_kernel_abi tests/kernel_abi_probe.s)
+    endif()
     add_executable(test_platform tests/test_platform.c)
     target_link_libraries(test_platform PRIVATE lisa_core)
     add_test(NAME test_platform COMMAND test_platform ${CMAKE_BINARY_DIR}/scratch)
@@ -340,9 +369,11 @@ if(LISA_BUILD_TESTS)
     add_test(NAME test_search_scalar COMMAND test_search)
     set_tests_properties(test_search_scalar PROPERTIES ENVIRONMENT "LISA_KERNEL=scalar")
 
-    add_executable(fuzz_retrieval_asm tests/fuzz_retrieval_asm.c)
-    target_link_libraries(fuzz_retrieval_asm PRIVATE lisa_core)
-    add_test(NAME fuzz_retrieval_asm COMMAND fuzz_retrieval_asm 1000 12345)
+    if(LISA_HAVE_ASM_KERNEL)
+        add_executable(fuzz_retrieval_asm tests/fuzz_retrieval_asm.c)
+        target_link_libraries(fuzz_retrieval_asm PRIVATE lisa_core)
+        add_test(NAME fuzz_retrieval_asm COMMAND fuzz_retrieval_asm 1000 12345)
+    endif()
 
     # Helpers for the end-to-end shell tests.
     add_executable(gen_test_data tests/gen_test_data.c)
