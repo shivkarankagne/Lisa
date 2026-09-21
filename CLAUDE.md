@@ -41,16 +41,27 @@ W1 → W2 → W3 → W4, W5 (parallel) → W6, W7 → W8 → W9 → W10 → W5b,
 W5b (docx + OCR of scanned PDFs) was moved into 1.0 from §8 L3 by the
 user on 2026-09-19 (plan decision 16).
 
-W1–W11 are done (reports `LISA_REPORT_AND_UPDATE_002.md`–`_013.md`),
-except code signing in W11 (needs an Apple Developer ID). Next are
-**W0** (competitor baseline) and **W12** (validation), then the polish
-list in report 012 §6. Check the plan's acceptance criteria for the package you
-are on; a package is not done until every criterion is met.
+W1–W11 are done (reports `LISA_REPORT_AND_UPDATE_002.md`–`_015.md`),
+except code signing in W11 (needs an Apple Developer ID). The macOS
+product works end to end and is validated on real documents; W5b, W10b,
+W12b (embedding batching) and W12c (e5-small-v2 default) are done. **W12
+validation is partly done** (eval set, crash and soak scripts, binary
+checks); the 8-hour soak, clean-machine and offline tests still need a
+person at the machine, and the W0 competitor baseline is blocked while
+the competitors are uninstalled. Decisions 16–20 are recorded in the
+plan §2; the current post-1.0 work is the **Linux headless port (W13,
+decision 20)** on the `linux-headless` branch. Check the plan's
+acceptance criteria for the package you are on; a package is not done
+until every criterion is met.
 
 ## Non-negotiable rules
 
-1. **Single executable.** `otool -L build/lisa` must list only macOS system
-   libraries and frameworks. Everything else is statically linked.
+1. **Single executable.** Everything but the OS's own libraries is
+   statically linked. On macOS, `otool -L build/lisa` must list only
+   system libraries and frameworks (`/usr/lib/`, `/System/Library/`); on
+   Linux, `ldd build/lisa` must list only the base C/C++ runtime and libc
+   (libc, libm, libstdc++, libpthread/libdl and the loader). No vendored
+   or third-party shared library, ever.
 2. **No runtime network access.** LISA never contacts external hosts. The
    only socket is the local HTTP server on 127.0.0.1.
 3. **Reuse before building.** If a permissively licensed library in plan §5
@@ -64,10 +75,62 @@ are on; a package is not done until every criterion is met.
    under stated conditions.
 6. **Build the seams (plan §7).** Every package must leave the seam it owns
    in place, so later features plug in without rewrites.
-7. **Portable by default (plan §2a).** Only ARM64 macOS is built for 1.0,
-   but code must not assume it.
+7. **Portable by default (plan §2a).** ARM64 macOS is the reference build;
+   x86-64 Linux is a supported port target (decision 20). Code must not
+   assume an OS or an architecture. OS-specific code lives only in
+   `src/platform/` and per-OS CMake branches — never in the core.
 8. **Say when something is incomplete.** Never hide missing functionality
    behind a plausible-looking abstraction or stub.
+
+## Protecting the working product
+
+The macOS product is built, tested, validated on real documents, and
+already handed to outside testers. From here, **the default is to protect
+it.** New work — ports, features, tuning — earns its place only if it
+leaves the working product intact. When a change cannot satisfy a rule
+below, stop and ask; do not work around it.
+
+1. **macOS ARM64 is the reference platform and the green baseline.** Its
+   behaviour and its full passing suite (Release **and** sanitizer, every
+   test, model tests included) are the definition of "working". No change,
+   least of all a port, may alter macOS behaviour or reduce the tests that
+   pass there. Run both macOS builds green before every commit; a port is
+   verified on its own platform *in addition*, never *instead*.
+2. **The core stays OS-free.** All OS calls (files, mmap, threads, time,
+   OCR, window, paths) go through `src/platform/platform.h`. To make a new
+   platform work you add a backend behind that header and a CMake branch —
+   you never edit core logic, a format, or a test to suit one OS. If the
+   core seems to need an `#ifdef`, the seam is in the wrong place: stop and
+   ask.
+3. **One core, one codebase, per-OS backends selected at build time.**
+   There is never a second copy of the core per OS, and never all OSes'
+   code compiled into one binary chosen at runtime. Each binary carries
+   only its own platform backend.
+4. **User data is now in the field — on-disk compatibility is sacred.**
+   The collection format, the vector-file format, `config.json`, the
+   server record, and the embedding recipe (`user_version`) are all
+   compatibility surfaces. Changes are additive only, with a version bump
+   and a migration tested against a saved file in the old format. Never
+   silently invalidate or misread a collection a shipped build wrote; a
+   model or recipe mismatch must be detected and reported, never guessed.
+5. **The two-layer "not found" promise is a feature, not a detail.** LISA
+   must refuse when the passages do not contain the answer, and every
+   answer must cite a passage that supports it. Do not weaken the
+   similarity floor, the refusal prompt, or citation handling to make an
+   answer appear. A confident answer with a false or absent citation is
+   the worst defect this product can ship (see report 015 §5).
+6. **Ports and risky features go on a branch; `main` stays releasable.**
+   Multi-platform and other work that is not yet green everywhere is
+   developed on a branch with CI green before it merges. `main` is always
+   a state you could hand to a tester.
+7. **A distributed binary leaks nothing about the build.** Any build given
+   to others is stripped and compiled with paths remapped
+   (`-ffile-prefix-map`), so it carries no source paths, usernames, or
+   internal layout. Verify with `strings` before handing it out. Never
+   distribute a file you have not read.
+8. **Locked scope is locked.** Decisions 1–20 in plan §2 are settled.
+   Do not reopen, "improve", or quietly redesign them. A new direction is
+   a new decision the user makes, recorded in the plan first.
 
 ## What NOT to do
 
