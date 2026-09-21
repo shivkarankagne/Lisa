@@ -32,14 +32,14 @@ right-click it in Finder → **Open** → **Open**.
     chmod +x lisa
     ./lisa --version
 
-**2. Get the models** (about 3 GB, once). LISA answers with a chat model
+**2. Get the models** (about 2.5 GB, once). LISA answers with a chat model
 and searches with an embedding model:
 
     mkdir -p ~/lisa-models && cd ~/lisa-models
     curl -L -O https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf
-    curl -L -O https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/370f27d7550e0def9b39c1f16d3fbaa13aa67728/Qwen3-Embedding-0.6B-Q8_0.gguf
+    curl -L -O https://huggingface.co/ggml-org/e5-small-v2-Q8_0-GGUF/resolve/main/e5-small-v2-q8_0.gguf
     lisa model --set ~/lisa-models/Qwen3-4B-Q4_K_M.gguf
-    lisa model --set ~/lisa-models/Qwen3-Embedding-0.6B-Q8_0.gguf
+    lisa model --set ~/lisa-models/e5-small-v2-q8_0.gguf
     lisa model            # shows both files and verifies them (SHA-256)
 
 **3. Add documents** (`.txt`, `.md`, `.pdf`, `.docx`; scanned PDFs are

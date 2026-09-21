@@ -185,6 +185,24 @@ int lisa_ingest_start(lisa_collection_t* coll, lisa_model_t* model,
         chunk.overlap_chars < 0 || chunk.overlap_chars >= chunk.target_chars)
         return LISA_E_INVALID_ARGUMENT;
 
+    /*
+     * Chunks must fit the embedding model. A BERT embedder holds 512
+     * tokens, far less than the 1,500 characters the chunker aims for,
+     * and a passage it cannot read is a passage that never gets a vector.
+     * Two characters per token is conservative for English and roughly
+     * right for dense scripts; the embedding side truncates anything
+     * that still does not fit, so a file is never lost to length.
+     */
+    lisa_model_info_t mi = LISA_MODEL_INFO_INIT;
+    if (lisa_model_info(model, &mi) == LISA_OK && mi.context_tokens > 0) {
+        int64_t fits = mi.context_tokens * 2;
+        if (chunk.max_chars > fits) {
+            chunk.max_chars = fits;
+            if (chunk.target_chars > chunk.max_chars) chunk.target_chars = chunk.max_chars;
+            if (chunk.overlap_chars >= chunk.target_chars) chunk.overlap_chars = chunk.target_chars / 8;
+        }
+    }
+
     for (int64_t i = 0; i < count; i++) {
         lisa_file_info_t info;
         if (paths[i] == NULL) return LISA_E_INVALID_ARGUMENT;

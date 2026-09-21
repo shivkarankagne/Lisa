@@ -43,21 +43,22 @@ static int file_exists(const char* p) {
 /* ---- no model needed -------------------------------------------------- */
 
 static void test_known_models_table(void) {
-    TEST_ASSERT_EQUAL_INT64(2, lisa_known_model_count());
+    TEST_ASSERT_EQUAL_INT64(3, lisa_known_model_count());
     int gen = 0, emb = 0;
     for (int64_t i = 0; i < lisa_known_model_count(); i++) {
         lisa_known_model_t k;
         TEST_ASSERT_EQUAL_INT(LISA_OK, lisa_known_model(i, &k));
         TEST_ASSERT_NOT_NULL(k.id);
         TEST_ASSERT_EQUAL_size_t(64, strlen(k.sha256));
-        TEST_ASSERT_EQUAL_STRING("Apache-2.0", k.license);
+        /* Every licence here must be one the project accepts. */
+        TEST_ASSERT_TRUE(strcmp(k.license, "Apache-2.0") == 0 || strcmp(k.license, "MIT") == 0);
         TEST_ASSERT_TRUE(k.file_size > 0);
         if (k.is_embedding) emb++; else gen++;
     }
     TEST_ASSERT_EQUAL_INT(1, gen);
-    TEST_ASSERT_EQUAL_INT(1, emb);
+    TEST_ASSERT_EQUAL_INT(2, emb);
     lisa_known_model_t k;
-    TEST_ASSERT_EQUAL_INT(LISA_E_INVALID_ARGUMENT, lisa_known_model(2, &k));
+    TEST_ASSERT_EQUAL_INT(LISA_E_INVALID_ARGUMENT, lisa_known_model(3, &k));
     TEST_ASSERT_EQUAL_INT(LISA_E_INVALID_ARGUMENT, lisa_known_model(-1, &k));
 }
 

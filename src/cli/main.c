@@ -214,7 +214,7 @@ static int cmd_ingest(app_t* app, const args_t* a) {
     }
     if (rc == LISA_OK) {
         rc = lisa_ingest_start(c, embed, (const char* const*)abs, n, NULL, &job);
-        if (rc == LISA_E_MODEL_MISMATCH) err = "the collection was built with a different embedding model";
+        if (rc == LISA_E_MODEL_MISMATCH) err = "the collection was built with a different embedding model; index it again to rebuild it";
     }
 
     lisa_ingest_status_t st = LISA_INGEST_STATUS_INIT;
@@ -334,7 +334,7 @@ static int cmd_search(app_t* app, const args_t* a) {
     int64_t n = 0;
     if (rc == LISA_OK) {
         rc = lisa_collection_query_text(c, embed, q, &opt, hits, opt.top_k, &n);
-        if (rc == LISA_E_MODEL_MISMATCH) err = "the collection was built with a different embedding model";
+        if (rc == LISA_E_MODEL_MISMATCH) err = "the collection was built with a different embedding model; index it again to rebuild it";
     }
     yyjson_mut_doc* doc = NULL;
     yyjson_mut_val* arr = NULL;
@@ -406,7 +406,7 @@ static int cmd_ask(app_t* app, const args_t* a) {
     if (rc == LISA_OK) {
         lisa_message_t m = { "user", a->pos[0] };
         rc = lisa_ask(c, embed, chat, &m, 1, &o, &ans);
-        if (rc == LISA_E_MODEL_MISMATCH) err = "the collection was built with a different embedding model";
+        if (rc == LISA_E_MODEL_MISMATCH) err = "the collection was built with a different embedding model; index it again to rebuild it";
         else if (rc == LISA_E_INTERNAL)
             err = "the model produced nothing; another AI app may be holding the GPU (close it and retry)";
     }

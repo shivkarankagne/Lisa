@@ -58,6 +58,8 @@ function showBanner(text) {
 function friendly(e) {
   if (e.code === "unauthorized") return "This page has no valid session. Open LISA again with `lisa gui`.";
   if (e.code === "no_model") return "The models are not loaded. Check Settings, then restart LISA.";
+  if (e.code === "model_mismatch")
+    return "This collection was built with a different embedding model. Add its folder again to rebuild it.";
   return e.message;
 }
 

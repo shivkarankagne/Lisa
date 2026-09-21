@@ -32,7 +32,51 @@ empty `<think></think>` block, as Qwen's template does for
 temperature 0.7, top-p 0.8, top-k 20, presence penalty 1.5. Temperature 0
 gives deterministic (greedy) output.
 
-## Embeddings: Qwen3-Embedding-0.6B (Q8_0)
+## Embeddings: e5-small-v2 (Q8_0) — the default
+
+| Field | Value |
+| :--- | :--- |
+| LISA profile id | `e5-small-v2-q8_0` |
+| File | `e5-small-v2-q8_0.gguf` |
+| Size | 36,685,088 bytes |
+| SHA-256 | `afdfb5c342d2efc2a051c426dd1d00913495d5f2bbceaea100d2f3892aa31cbc` |
+| Source | https://huggingface.co/ggml-org/e5-small-v2-Q8_0-GGUF (published by ggml-org, the llama.cpp project) |
+| License | MIT |
+| Output | 384 dimensions, mean-pooled |
+
+Measured against Qwen3-Embedding-0.6B on the 51-document benchmark corpus
+(M2, 16 GB, idle), same questions, same chat model:
+
+| | Qwen3-Embedding-0.6B | e5-small-v2 |
+| :--- | :--- | :--- |
+| Indexing 51 documents | 3,135 s | **133 s** |
+| Index on disk | 67 MB | **38 MB** |
+| Model file | 639 MB | **37 MB** |
+| Answers containing the fact | 50 / 54 | **51 / 54** |
+| Citing the right document | 52 / 54 | 52 / 54 |
+| Passage recall@10 | 52 / 54 | **53 / 54** |
+| Unanswerable refused | 4 / 4 | 4 / 4 |
+
+Twenty-three times faster to index, a smaller index, and marginally better
+scores. Indexing speed is what decides whether someone keeps LISA: a
+folder of a few thousand files took a working day with the larger model.
+
+How LISA uses it: mean pooling, with the prefixes the model was trained
+with — `query: ` for questions and `passage: ` for documents. Without them
+the vectors are noticeably worse.
+
+**What it costs.** e5-small-v2 is trained on English. Documents in other
+scripts are still found, because the keyword index (FTS5) is
+language-agnostic and the two are fused: the Hindi and Marathi questions
+in the eval set are answered correctly with this model. But a question in
+another language that needs *semantic* matching rather than shared words
+may not be. Anyone who needs that should set the Qwen model below.
+
+The model's position table holds 512 tokens, so LISA caps chunks to fit
+it and truncates anything longer for the vector only — the text is stored
+whole, found by keyword, and quoted in full in citations.
+
+## Embeddings: Qwen3-Embedding-0.6B (Q8_0) — multilingual alternative
 
 | Field | Value |
 | :--- | :--- |
@@ -44,14 +88,17 @@ gives deterministic (greedy) output.
 | License | Apache-2.0 |
 | Output | 1024 dimensions, L2-normalised; may be truncated (Matryoshka) |
 
-Why this instead of multilingual-e5-small (the size originally preferred):
-e5-small is only available as GGUF from third-party converters of unknown
-provenance, which a security reviewer cannot accept. Qwen3-Embedding-0.6B
-is published as GGUF by its authors, under Apache-2.0, is multilingual
-(including Indian languages), and supports truncating vectors (e.g. to 512
-or 256 dimensions) to keep indexes small. If a smaller model is needed
-later, e5-small can be converted in-house from the official weights with a
-pinned converter and recorded here.
+Set it with `lisa model --set <path>` when semantic search in languages
+other than English matters more than indexing speed. A collection records
+the model that built it; changing model means indexing the folder again.
+
+This was the default until 2026-09-21. It was chosen over e5 because
+e5-small was then only available as GGUF from third-party converters of
+unknown provenance. That objection no longer holds for `e5-small-v2`,
+which ggml-org — the llama.cpp project itself — publishes. (Two
+third-party conversions of *multilingual*-e5-small were tried first and
+both were broken: one omitted the token type count, the other crashed on
+a vocabulary mismatch.)
 
 How LISA uses it: last-token pooling (from the model metadata). Queries
 are prefixed with

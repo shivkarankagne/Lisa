@@ -37,6 +37,11 @@
 
 /* ==== Known models ==================================================== */
 
+/*
+ * Known models. The order matters: when no model is configured, the
+ * program takes the first entry of each kind that is present on disk,
+ * so the preferred default comes first.
+ */
 static const lm_profile_t k_profiles[] = {
     {
         "qwen3-4b-q4_k_m", "Qwen3-4B-Q4_K_M.gguf", 2497280256LL,
@@ -48,6 +53,17 @@ static const lm_profile_t k_profiles[] = {
          * emits for enable_thinking=False. Sampling per the model card. */
         "<think>\n\n</think>\n\n", 0.7f, 0.8f, 20, 1.5f,
         NULL, NULL, 0, 0,
+    },
+    {
+        "e5-small-v2-q8_0", "e5-small-v2-q8_0.gguf", 36685088LL,
+        "afdfb5c342d2efc2a051c426dd1d00913495d5f2bbceaea100d2f3892aa31cbc",
+        "MIT",
+        "https://huggingface.co/ggml-org/e5-small-v2-Q8_0-GGUF",
+        1,
+        NULL, 0, 0, 0, 0,
+        /* E5 was trained with these exact prefixes; without them the
+         * vectors are noticeably worse. Mean pooling, so no EOS. */
+        "query: ", "passage: ", 0, 0,
     },
     {
         "qwen3-embedding-0.6b-q8_0", "Qwen3-Embedding-0.6B-Q8_0.gguf", 639150592LL,
@@ -273,7 +289,14 @@ static int ensure_gen_ctx(lm_model_t* m) {
 static int ensure_emb_ctx(lm_model_t* m) {
     if (m->emb_ctx) return LM_OK;
     struct llama_context_params cp = llama_context_default_params();
-    int64_t n = (int64_t)EMBED_SLOT_TOKENS * EMBED_MAX_SEQ;
+    /*
+     * The slot must also fit the model: a BERT embedder has an absolute
+     * position table of 512 entries, and sending it more than that walks
+     * off the end of the table inside ggml. context_tokens is already
+     * clamped to what the model was trained for.
+     */
+    int64_t slot = m->context_tokens < EMBED_SLOT_TOKENS ? m->context_tokens : EMBED_SLOT_TOKENS;
+    int64_t n = slot * EMBED_MAX_SEQ;
     cp.n_ctx = (uint32_t)n;
     cp.n_batch = (uint32_t)n;   /* pooled embeddings need the whole sequence in one batch */
     cp.n_ubatch = (uint32_t)n;
@@ -542,6 +565,7 @@ int lm_embed(lm_model_t* m, int kind, const char* const* texts, int64_t n,
     const char* prefix = kind == LM_EMBED_QUERY ? m->profile->query_prefix
                                                 : m->profile->document_prefix;
     if (prefix == NULL) prefix = "";
+    int64_t per_seq = n_ctx / EMBED_MAX_SEQ;
 
     /*
      * Tokenise every passage first, then embed as many as fit in one call
@@ -549,7 +573,6 @@ int lm_embed(lm_model_t* m, int kind, const char* const* texts, int64_t n,
      * context holds). Each sequence is pooled separately by llama.cpp, so
      * the vectors are the same as embedding them one at a time.
      */
-    int64_t per_seq = EMBED_SLOT_TOKENS;
     llama_token** toks = (llama_token**)calloc((size_t)n, sizeof(llama_token*));
     int32_t* lens = (int32_t*)calloc((size_t)n, sizeof(int32_t));
     if (toks == NULL || lens == NULL) {
@@ -586,12 +609,13 @@ int lm_embed(lm_model_t* m, int kind, const char* const* texts, int64_t n,
         }
         /*
          * A passage longer than one slot cannot be embedded even alone,
-         * so it is refused here with a clear error rather than failing
-         * inside llama.cpp. The chunker's limit keeps this unreachable
-         * in practice.
+         * because the slot size is fixed when the context is created.
+         * The tail is dropped for the vector rather than failing the
+         * whole file: the text is still stored whole, still found by the
+         * keyword index, and still quoted in full in a citation.
          */
         if (lens[i] == 0) rc = LM_EINVAL;
-        else if (lens[i] > per_seq) rc = LM_ECONTEXT;
+        else if (lens[i] > per_seq) lens[i] = (int32_t)per_seq;
     }
 
     for (int64_t first = 0; rc == LM_OK && first < n; ) {
