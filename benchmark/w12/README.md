@@ -12,8 +12,8 @@ these is run on an idle machine, one at a time.
 | Eval set ≥ 50 questions, recall@k and citation accuracy | `benchmark/w0/run_lisa.py` | 58 questions |
 | Crash recovery | `crash_serve.sh` | script below |
 | 8-hour soak on `serve` | `soak.sh` | script below |
-| Clean-machine test | by hand: fresh macOS user account, copy binary + model, run the quickstart through the GUI and the CLI | by hand |
-| Offline test | by hand: Wi-Fi off from first copy to first answer | by hand |
+| Clean-machine test | `manual-tests.md` section A | by hand |
+| Offline test | `manual-tests.md` section B | by hand |
 | Binary size and `otool -L` | `ls -l build/lisa`, `otool -L build/lisa` | recorded in the report |
 | Matches or beats W0 | needs the competitors installed again | blocked |
 
@@ -37,3 +37,14 @@ It fails if any request fails, or if the median memory of the last eighth
 of the run is more than 10% above the first eighth — the shape a leak
 takes over a long run. Needs a collection that is already indexed; the
 W0 data directory is the default.
+
+For the eight-hour run, use `soak_overnight.sh`: it refuses to start if
+another model runner is up, keeps the Mac awake, and detaches so the run
+survives the terminal closing.
+
+    benchmark/w12/soak_overnight.sh          # then read soak-latest.log in the morning
+
+## manual-tests.md
+
+The clean-machine and offline tests, which need a fresh macOS account
+and the network off. About 40 minutes for both, run in one sitting.
