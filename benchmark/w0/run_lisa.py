@@ -32,6 +32,8 @@ ap.add_argument("--data", default=str(HERE / "data-lisa"))
 ap.add_argument("--out", default=str(HERE / "results-lisa.json"))
 ap.add_argument("--questions", default=str(HERE / "questions.json"))
 ap.add_argument("--collection", default="bench")
+ap.add_argument("--embed-model", help="embedding .gguf to use (default: whatever models/ offers)")
+ap.add_argument("--chat-model", help="generation .gguf to use")
 ap.add_argument("--skip-ingest", action="store_true")
 args = ap.parse_args()
 
@@ -62,6 +64,17 @@ print(f"corpus: {n_files} files, {n_bytes / 1e6:.1f} MB")
 # ---- index ---------------------------------------------------------------------
 if not args.skip_ingest:
     shutil.rmtree(args.data, ignore_errors=True)
+    """
+    The data directory is wiped above, which takes config.json with it.
+    Models chosen for this run are therefore set afterwards, not before,
+    or `lisa` falls back to whatever it finds in models/ — which silently
+    ran the wrong embedding model and made a whole comparison worthless.
+    """
+    for m in (args.embed_model, args.chat_model):
+        if m:
+            q = run([args.bin, "model", "--data", args.data, "--set", m])[0]
+            if q.returncode != 0:
+                sys.exit(f"could not set model {m}: {q.stderr[-500:]}")
     print("indexing...", flush=True)
     p, elapsed, peak = run([args.bin, "ingest", "--data", args.data,
                             "--collection", args.collection, args.corpus, "--json"])
@@ -69,6 +82,13 @@ if not args.skip_ingest:
         sys.exit(f"ingest failed: {p.stderr[-2000:]}")
     st = json.loads(p.stdout)
     results["index"] = {"seconds": round(elapsed, 1), "peak_rss_mb": round(peak, 1), **st}
+    # Record what actually ran, so two results files can be compared safely.
+    mp = run([args.bin, "model", "--data", args.data, "--json"])[0]
+    if mp.returncode == 0:
+        try:
+            results["models"] = json.loads(mp.stdout)
+        except ValueError:
+            pass
     disk = sum(f.stat().st_size for f in pathlib.Path(args.data).rglob("*") if f.is_file())
     results["index"]["index_bytes"] = disk
     print(f"  {st['files_added']} files, {st['chunks_added']} chunks, {elapsed:.1f}s, "
