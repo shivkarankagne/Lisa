@@ -16,17 +16,22 @@
 #include "../platform/platform.h"
 
 #define DEFAULT_CONTEXT   4096
-#define EMBED_CONTEXT     8192   /* chunks are <= 1,500 chars; dense scripts can exceed 2,048 tokens */
 /*
- * Passages embedded in one GPU call. The embedding context is shared
- * between sequences, so each one may use only EMBED_CONTEXT /
- * EMBED_MAX_SEQ tokens: with 8 sequences a 671-token passage could not be
- * embedded at all ("find_slot: n_tokens = 671 > size = 512"), and the
- * file was recorded as failed. Batching also measured only 1.2x on an M2
- * (report 014) because the GPU is already busy, so one sequence per call
- * is the safe choice until a smaller embedding model makes it matter.
+ * Passages embedded in one llama_decode call, and the context each one
+ * gets. llama.cpp splits the context between sequences when the context
+ * is created, so the slot size is fixed then: a passage that exceeds it
+ * cannot be embedded at all, not even on its own ("find_slot: n_tokens =
+ * 671 > size = 512"), and its file is recorded as failed. The slot is
+ * therefore sized above the chunker's hard limit of 1,500 characters,
+ * which is about 2,000 tokens in the densest scripts, and the context is
+ * the slot times the number of sequences.
+ *
+ * More sequences cost key/value cache: this model spends about 112 KB
+ * per token of context, so every extra sequence is another 230 MB.
  */
+#define EMBED_SLOT_TOKENS 2048
 #define EMBED_MAX_SEQ     1
+
 #define PROMPT_BATCH      512
 #define PENALTY_LAST_N    64
 
@@ -268,7 +273,7 @@ static int ensure_gen_ctx(lm_model_t* m) {
 static int ensure_emb_ctx(lm_model_t* m) {
     if (m->emb_ctx) return LM_OK;
     struct llama_context_params cp = llama_context_default_params();
-    int64_t n = m->context_tokens < EMBED_CONTEXT ? m->context_tokens : EMBED_CONTEXT;
+    int64_t n = (int64_t)EMBED_SLOT_TOKENS * EMBED_MAX_SEQ;
     cp.n_ctx = (uint32_t)n;
     cp.n_batch = (uint32_t)n;   /* pooled embeddings need the whole sequence in one batch */
     cp.n_ubatch = (uint32_t)n;
@@ -544,7 +549,7 @@ int lm_embed(lm_model_t* m, int kind, const char* const* texts, int64_t n,
      * context holds). Each sequence is pooled separately by llama.cpp, so
      * the vectors are the same as embedding them one at a time.
      */
-    int64_t per_seq = n_ctx / EMBED_MAX_SEQ;
+    int64_t per_seq = EMBED_SLOT_TOKENS;
     llama_token** toks = (llama_token**)calloc((size_t)n, sizeof(llama_token*));
     int32_t* lens = (int32_t*)calloc((size_t)n, sizeof(int32_t));
     if (toks == NULL || lens == NULL) {
@@ -579,8 +584,14 @@ int lm_embed(lm_model_t* m, int kind, const char* const* texts, int64_t n,
             toks[i] = g;
             toks[i][lens[i]++] = llama_vocab_eos(m->vocab);
         }
+        /*
+         * A passage longer than one slot cannot be embedded even alone,
+         * so it is refused here with a clear error rather than failing
+         * inside llama.cpp. The chunker's limit keeps this unreachable
+         * in practice.
+         */
         if (lens[i] == 0) rc = LM_EINVAL;
-        else if (lens[i] > n_ctx) rc = LM_ECONTEXT;
+        else if (lens[i] > per_seq) rc = LM_ECONTEXT;
     }
 
     for (int64_t first = 0; rc == LM_OK && first < n; ) {
