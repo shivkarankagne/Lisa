@@ -75,7 +75,14 @@ gn gen out/lisa --args="
     clang_use_chrome_plugins=false
     treat_warnings_as_errors=false
     use_remoteexec=false
+    use_thin_lto=false
+    is_cfi=false
 "
+# Thin-LTO (Chromium's default) leaves LLVM bitcode in the object files,
+# which the LLVM linker can read but GNU ld (the default on Linux) cannot
+# ("unknown architecture of input file"). Disabling it, and CFI which
+# depends on it, makes libpdfium.a a plain native archive that any linker
+# accepts. It also keeps the two platforms' archives built the same way.
 ninja -C out/lisa pdfium
 
 rm -rf "$OUT"
