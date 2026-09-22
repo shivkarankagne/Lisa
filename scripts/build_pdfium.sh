@@ -79,6 +79,7 @@ gn gen out/lisa --args="
     is_cfi=false
     use_allocator_shim=false
     use_partition_alloc_as_malloc=false
+    use_lld=false
 "
 # Thin-LTO (Chromium's default) leaves LLVM bitcode in the object files,
 # which the LLVM linker can read but GNU ld (the default on Linux) cannot
@@ -91,6 +92,14 @@ gn gen out/lisa --args="
 # initializers, which crashes any non-Chromium program that links PDFium
 # — every LISA binary segfaulted at startup on Linux until these were
 # turned off. PDFium then uses the system allocator.
+#
+# use_lld=false: with its own lld, Chromium's Linux x64 build assembles
+# CREL (compact) relocations (-Wa,--crel), a 2024 format that GNU ld,
+# mold and lld here cannot all handle — the objects would not link, or
+# linked with a null static initializer that crashed at startup. It is
+# excluded on ARM upstream, which is why macOS was unaffected. Turning
+# lld off makes the objects use ordinary relocations that any linker
+# reads.
 ninja -C out/lisa pdfium
 
 rm -rf "$OUT"
