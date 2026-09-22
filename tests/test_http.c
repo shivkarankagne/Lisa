@@ -14,6 +14,8 @@
 #include <time.h>
 #include <unistd.h>
 
+#include "../src/platform/platform.h"
+
 #include "unity.h"
 #include "civetweb.h"
 #include "yyjson.h"
@@ -95,7 +97,7 @@ static int http_at(int port, const char* method, const char* path, const char* e
         g_body[len] = '\0';
         if (g_read_until == NULL || strstr(g_body, g_read_until) != NULL) break;
         if (time(NULL) >= deadline) break;
-        usleep(100000);   /* the model is still generating */
+        lisa_sleep_ms(100);   /* the model is still generating */
     }
     g_body[len] = '\0';
     mg_close_connection(c);
@@ -412,7 +414,7 @@ static void test_ingest_search_ask(void) {
         TEST_ASSERT_EQUAL_INT(200, http("GET", path, NULL, 1, NULL));
         field("job.state", b, sizeof(b));
         done = strcmp(b, "succeeded") == 0 || strcmp(b, "failed") == 0;
-        if (!done) usleep(200000);
+        if (!done) lisa_sleep_ms(200);
     }
     TEST_ASSERT_EQUAL_STRING("succeeded", b);
     TEST_ASSERT_EQUAL_STRING("2", field("job.files_added", b, sizeof(b)));

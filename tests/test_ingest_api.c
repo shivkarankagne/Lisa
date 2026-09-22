@@ -13,6 +13,8 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "../src/platform/platform.h"
+
 #include "unity.h"
 #include "lisa.h"
 
@@ -216,7 +218,7 @@ static void test_background_job_busy_and_concurrent_search(void) {
         TEST_ASSERT_EQUAL_INT(LISA_OK, lisa_collection_refresh(r));
         TEST_ASSERT_EQUAL_INT(LISA_OK, lisa_collection_search_vector(r, zero, NULL, hits, 3, &n));
         searched++;
-        usleep(20000);
+        lisa_sleep_ms(20);
     } while (st.state == LISA_JOB_RUNNING);
 
     TEST_ASSERT_EQUAL_INT(LISA_OK, lisa_ingest_wait(job, &st));
