@@ -133,3 +133,54 @@ jobs:
         run: |
           ./build/lisa --version
           ldd build/lisa || true
+
+  # Proves the model runtime (llama.cpp CPU backend) and the full answer
+  # pipeline work on Linux — not just search. Slow (models run on the CPU),
+  # so it is a separate job from the fast, model-free one above.
+  linux-x64-models:
+    name: Linux x64 (models)
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lld mold
+          cmake --version
+
+      - name: Cache models
+        uses: actions/cache@v4
+        with:
+          path: models
+          key: models-e5-small-v2-q8-qwen3-4b-q4km-bc640142
+
+      - name: Download models (verified)
+        run: |
+          mkdir -p models
+          get() {  # url file sha256
+            if [ ! -f "models/$2" ]; then
+              curl -sfL --retry 5 -o "models/$2.part" "$1"
+              echo "$3  models/$2.part" | shasum -a 256 -c -
+              mv "models/$2.part" "models/$2"
+            fi
+          }
+          get https://huggingface.co/ggml-org/e5-small-v2-Q8_0-GGUF/resolve/main/e5-small-v2-q8_0.gguf \
+              e5-small-v2-q8_0.gguf afdfb5c342d2efc2a051c426dd1d00913495d5f2bbceaea100d2f3892aa31cbc
+          get https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf \
+              Qwen3-4B-Q4_K_M.gguf 7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5
+
+      - name: Fetch PDFium (prebuilt, SHA-256 verified)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/fetch_pdfium.sh
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DLISA_REQUIRE_PDF=ON
+
+      - name: Build
+        run: cmake --build build -j "$(nproc)"
+
+      - name: Test (with models; only the browser GUI test is skipped)
+        run: ctest --test-dir build --output-on-failure --timeout 3600 -E "test_gui"
