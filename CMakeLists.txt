@@ -88,6 +88,19 @@ else()
         "LISA supports ARM64 and x86-64. Detected: ${CMAKE_SYSTEM_PROCESSOR}")
 endif()
 
+# On Linux, link with LLVM's lld when it is present. The static PDFium is
+# built with Chromium's clang, and its (native ELF) objects use features
+# that GNU ld rejects as "unknown architecture"; lld — the linker
+# Chromium itself uses — links them. Falls back to the default linker
+# when lld is absent (a PDF-less build still links fine).
+if(NOT APPLE)
+    find_program(LISA_LLD NAMES ld.lld lld)
+    if(LISA_LLD)
+        add_link_options(-fuse-ld=lld)
+        message(STATUS "Linking with lld (${LISA_LLD})")
+    endif()
+endif()
+
 # ---- third-party (see third_party/README.md) ---------------------------
 
 add_library(lisa_sqlite STATIC third_party/sqlite/sqlite3.c)
