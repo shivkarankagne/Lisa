@@ -120,11 +120,15 @@ jobs:
       - name: Build
         run: cmake --build build -j "$(nproc)"
 
-      # TEMPORARY: backtrace the startup segfault.
+      # TEMPORARY: understand the null static initializer.
       - name: Diagnose startup crash
         run: |
-          sudo apt-get install -y gdb
-          gdb -batch -ex run -ex bt -ex quit --args ./build/lisa --version || true
+          sudo apt-get install -y gdb binutils
+          echo "=== ld.lld version ==="; ld.lld --version
+          echo "=== .init_array bytes ==="; readelf -x .init_array ./build/lisa || true
+          echo "=== legacy .ctors present? ==="; readelf -SW ./build/lisa | grep -iE "ctors|init_array|preinit" || true
+          echo "=== relocations into .init_array ==="; readelf -rW ./build/lisa | grep -iE "init_array|RELATIVE" | head || true
+          echo "=== gdb backtrace ==="; gdb -batch -ex run -ex bt -ex quit --args ./build/lisa --version || true
 
       # test_gui needs a browser; it is exercised on macOS. Model tests
       # self-skip without models.
