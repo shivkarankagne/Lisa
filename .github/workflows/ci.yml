@@ -89,12 +89,12 @@ jobs:
             exit 1
           fi
 
-  # First step of the Linux port (plan W13): prove the core is portable by
-  # building and testing it on real Linux. No GPU, no PDFium, no models
-  # yet — those tests skip themselves. It confirms the platform layer,
-  # kernels, storage, retrieval and context compile and pass off macOS.
+  # The Linux port (plan W13): the portable core, plus PDF, built and
+  # tested on real Linux. No GPU and no models yet; those tests skip
+  # themselves. Confirms the platform layer, kernels, storage, retrieval,
+  # context and PDF extraction compile and pass off macOS.
   linux-x64:
-    name: Linux x64 (headless, no PDF/models)
+    name: Linux x64 (headless, no models)
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -106,17 +106,21 @@ jobs:
           cc --version
           cmake --version
 
+      - name: Fetch PDFium (prebuilt, SHA-256 verified)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/fetch_pdfium.sh
+
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DLISA_REQUIRE_PDF=OFF -DLISA_MODELS_DIR=/nonexistent
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DLISA_REQUIRE_PDF=ON -DLISA_MODELS_DIR=/nonexistent
 
       - name: Build
         run: cmake --build build -j "$(nproc)"
 
-      # test_gui needs a browser and test_ingest asserts PDF handling; both
-      # are exercised on macOS. Making test_ingest PDF-config-aware so it can
-      # run here too is a follow-up. Model tests self-skip (no models).
-      - name: Test (model-, PDF- and GUI-free tests)
-        run: ctest --test-dir build --output-on-failure --timeout 900 -E "test_gui|test_ingest"
+      # test_gui needs a browser; it is exercised on macOS. Model tests
+      # self-skip without models.
+      - name: Test (model- and GUI-free tests)
+        run: ctest --test-dir build --output-on-failure --timeout 900 -E "test_gui"
 
       - name: Runtime smoke check
         run: |
