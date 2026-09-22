@@ -15,7 +15,7 @@ hand; the Linux archive is built and published by
 | Platform | Asset (release tag `deps-<asset>`) | SHA-256 |
 | :--- | :--- | :--- |
 | macOS arm64 | `pdfium-chromium-8057-mac-arm64.tar.gz` | `07ae3e816fee0626ffd1c31cc3b10be3bbadccad3eb3033691b777d1dd5c0ba9` |
-| Linux x64 | `pdfium-chromium-8057-linux-x64.tar.gz` | `f9819b5206d0875c2c35392214c0dca99db966577bca960a78b2131bbc8b7b1e` |
+| Linux x64 | `pdfium-chromium-8057-linux-x64.tar.gz` | `e1200afa122fcef4e054d1e173d307b90f1f2c2b7559efa4a7a9c7558b56a1a9` |
 
 | Field | Value |
 | :--- | :--- |
