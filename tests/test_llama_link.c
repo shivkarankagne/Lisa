@@ -28,9 +28,15 @@ static void test_cpu_backend_present(void) {
 static void test_build_features(void) {
     const char* info = llama_print_system_info();
     TEST_ASSERT_NOT_NULL(info);
-    /* NEON is mandatory on ARM64; Metal library must be embedded. */
+    /*
+     * The Apple Silicon build must have NEON and the embedded Metal
+     * library. Other builds (e.g. the x86-64 Linux port) use the portable
+     * CPU backend, so only require that the info string is present.
+     */
+#if defined(__APPLE__) && defined(__aarch64__)
     TEST_ASSERT_NOT_NULL(strstr(info, "NEON = 1"));
     TEST_ASSERT_NOT_NULL(strstr(info, "EMBED_LIBRARY = 1"));
+#endif
 }
 
 int main(void) {

@@ -112,8 +112,11 @@ jobs:
       - name: Build
         run: cmake --build build -j "$(nproc)"
 
-      - name: Test (model-, PDF- and GUI-free tests run; the rest skip)
-        run: ctest --test-dir build --output-on-failure --timeout 900
+      # test_gui needs a browser and test_ingest asserts PDF handling; both
+      # are exercised on macOS. Making test_ingest PDF-config-aware so it can
+      # run here too is a follow-up. Model tests self-skip (no models).
+      - name: Test (model-, PDF- and GUI-free tests)
+        run: ctest --test-dir build --output-on-failure --timeout 900 -E "test_gui|test_ingest"
 
       - name: Runtime smoke check
         run: |

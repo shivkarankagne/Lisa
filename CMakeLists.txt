@@ -271,6 +271,14 @@ if(LISA_BUILD_TESTS)
     enable_testing()
     set(LISA_MODELS_DIR "${CMAKE_SOURCE_DIR}/models" CACHE PATH "Directory with the default model files")
 
+    # Tests use POSIX functions (strdup, getpid, realpath, symlink) that
+    # glibc hides under a strict -std=c11 (CMAKE_C_EXTENSIONS is OFF); the
+    # product declares them per file the same way. Without this, strdup is
+    # implicitly declared as returning int on Linux, its pointer is
+    # truncated to 32 bits, and the test crashes. Applies only to targets
+    # defined below, not to the product compiled above. No effect on macOS.
+    add_compile_definitions(_DEFAULT_SOURCE)
+
     add_library(lisa_unity STATIC third_party/unity/unity.c)
     target_include_directories(lisa_unity PUBLIC third_party/unity)
     target_compile_options(lisa_unity PRIVATE -w)

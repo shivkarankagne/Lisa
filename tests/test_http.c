@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -457,12 +458,14 @@ int main(int argc, char** argv) {
         return 2;
     }
     mkdir(argv[1], 0755);
-    /* The API takes absolute paths only. */
-    static char scratch[1024], fixtures[1024];
+    /* The API takes absolute paths only. realpath may write up to
+     * PATH_MAX bytes, and glibc's fortified realpath aborts if the buffer
+     * is smaller than that (PATH_MAX is 4096 on Linux, 1024 on macOS). */
+    static char scratch[PATH_MAX], fixtures[PATH_MAX];
     if (!realpath(argv[1], scratch) || !realpath(argv[2], fixtures)) return 2;
     g_scratch = scratch;
     g_fixtures = fixtures;
-    static char models[1024];
+    static char models[PATH_MAX];
     g_models = realpath(argv[3], models) ? models : argv[3];
     char data[800];
     snprintf(data, sizeof(data), "%s/http_data_%d", g_scratch, (int)getpid());
