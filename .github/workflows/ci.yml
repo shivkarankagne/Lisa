@@ -133,3 +133,57 @@ jobs:
         run: |
           ./build/lisa --version
           ldd build/lisa || true
+
+  # Proves the model runtime (llama.cpp CPU backend) and the full answer
+  # pipeline work on Linux — not just search. Slow (models run on the CPU),
+  # so it is a separate job from the fast, model-free one above.
+  linux-x64-models:
+    name: Linux x64 (models)
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lld mold
+          cmake --version
+
+      # The model tests reference the chat model and the Qwen embedding
+      # model by name (as the macOS job does); with a different embedding
+      # model present they silently no-op instead of running inference.
+      - name: Cache models
+        uses: actions/cache@v4
+        with:
+          path: models
+          key: models-qwen3-4b-q4km-bc640142-qwen3-emb-06b-q8-370f27d7
+
+      - name: Download models (verified)
+        run: |
+          mkdir -p models
+          get() {  # repo revision file sha256
+            if [ ! -f "models/$3" ]; then
+              curl -sfL --retry 5 -o "models/$3.part" "https://huggingface.co/$1/resolve/$2/$3"
+              echo "$4  models/$3.part" | shasum -a 256 -c -
+              mv "models/$3.part" "models/$3"
+            fi
+          }
+          get Qwen/Qwen3-4B-GGUF bc640142c66e1fdd12af0bd68f40445458f3869b \
+              Qwen3-4B-Q4_K_M.gguf 7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5
+          get Qwen/Qwen3-Embedding-0.6B-GGUF 370f27d7550e0def9b39c1f16d3fbaa13aa67728 \
+              Qwen3-Embedding-0.6B-Q8_0.gguf 06507c7b42688469c4e7298b0a1e16deff06caf291cf0a5b278c308249c3e439
+
+      - name: Fetch PDFium (prebuilt, SHA-256 verified)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/fetch_pdfium.sh
+
+      - name: Configure
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DLISA_REQUIRE_PDF=ON
+
+      - name: Build
+        run: cmake --build build -j "$(nproc)"
+
+      - name: Test (with models; only the browser GUI test is skipped)
+        run: ctest --test-dir build --output-on-failure --timeout 3600 -E "test_gui"
