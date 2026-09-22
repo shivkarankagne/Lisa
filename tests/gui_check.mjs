@@ -139,8 +139,15 @@ try {
   check("token kept for the session", (await js("sessionStorage.getItem('lisa.token') || ''")).length >= 16);
   check("settings view hidden on the ask view",
         await js("getComputedStyle(document.getElementById('view-settings')).display === 'none'"));
-  check("no error banner", await js("document.getElementById('banner').hidden"),
-        await js("document.getElementById('banner').textContent"));
+  // With models, the banner must be hidden. Without them (the sanitizer CI
+  // job runs with no models), the "a model is missing" notice is expected
+  // and correct, not a failure.
+  {
+    const hidden = await js("document.getElementById('banner').hidden");
+    const text = await js("document.getElementById('banner').textContent");
+    const benign = !withModels && /model is missing/i.test(text);
+    check("no error banner", hidden || benign, text);
+  }
 
   // Every control has an accessible name.
   const unnamed = await js(`[...document.querySelectorAll('button, input, textarea')].filter(el => {
@@ -191,7 +198,7 @@ try {
     await js(`document.getElementById('question').value = 'Who won the cricket world cup in 2011?';
               document.getElementById('ask-form').requestSubmit(); true`);
     check("off-topic question says not found",
-          await waitFor("document.getElementById('answer-text').classList.contains('notfound')", 120000),
+          await waitFor("document.getElementById('answer-text').classList.contains('notfound')", MODEL_MS),
           await js("document.getElementById('answer-text').textContent"));
   }
 
