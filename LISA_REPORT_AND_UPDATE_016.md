@@ -11,7 +11,7 @@
 
 The portable core builds and passes its tests on x86-64 Linux. This is
 the first step of W13: the command-line and local server, no GUI window,
-no PDF, no GPU. It is done and verified on GitHub Actions' Ubuntu runner
+no GPU; PDF works. It is done and verified on GitHub Actions' Ubuntu runner
 (the work is written on a Mac, which cannot build Linux binaries).
 
 The Linux CI job — Configure, Build, Test, and a runtime smoke check —
@@ -54,12 +54,11 @@ macOS that the fix changed nothing there.
 | `test_http` `*** buffer overflow detected ***` | `realpath` given 1,024-byte buffers, but `PATH_MAX` is 4,096 on Linux and glibc's fortified `realpath` aborts below `PATH_MAX` | `realpath` buffers are now `PATH_MAX` |
 | `useconds_t` undeclared; `usleep` hidden | BSD/macOS conveniences needing a feature macro on glibc | Tests use `lisa_sleep_ms` from the platform layer |
 | `test_llama_link` failed `NEON = 1` / Metal | Apple-ARM64-only assertions | Guarded to Apple ARM64; every build still requires the CPU backend |
+| Linux `libpdfium.a` would not link into any binary | Chromium's Linux-x64 build emits **CREL** (2024 compact relocations) under lld, which GNU ld ("unknown architecture"), mold ("unsupported section type 0x40000014") and lld (null `.init_array`, crash before `main`) could not all handle. CREL is excluded on ARM upstream, so macOS was unaffected | Strip the `-Wa,--crel` flag from the fetched Chromium build config before `gn gen` (lld stays, since Chromium's sysroot needs it); the objects then use ordinary relocations. thin-LTO and the PartitionAlloc malloc shim, which each broke linking or startup on the way, are also turned off |
+| `test_scanned_pdf_ocr` failed on Linux | The no-recogniser branch had never run (macOS always has Vision) and asserted zero leading newlines, but two empty scanned pages emit two page separators | Assert instead that no scanned words are extracted without OCR |
 
 ## 4. Not done (follow-ups)
 
-- **PDFium on Linux.** The macOS build self-hosts a mac-arm64 static
-  PDFium; Linux needs its own. Until then the Linux build is configured
-  with `-DLISA_REQUIRE_PDF=OFF` and does not read PDFs.
 - **Models and inference on Linux CI.** The Linux job runs the model-free
   tests; model tests are exercised on macOS.
 - **`test_ingest` on Linux.** It asserts PDF handling, so it is skipped
