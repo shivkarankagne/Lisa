@@ -120,6 +120,12 @@ jobs:
       - name: Build
         run: cmake --build build -j "$(nproc)"
 
+      # TEMPORARY: backtrace the startup segfault.
+      - name: Diagnose startup crash
+        run: |
+          sudo apt-get install -y gdb
+          gdb -batch -ex run -ex bt -ex quit --args ./build/lisa --version || true
+
       # test_gui needs a browser; it is exercised on macOS. Model tests
       # self-skip without models.
       - name: Test (model- and GUI-free tests)
