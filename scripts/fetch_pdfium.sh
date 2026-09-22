@@ -25,7 +25,7 @@ case "$(uname -s)/$(uname -m)" in
         ;;
     Linux/x86_64)
         ASSET="pdfium-chromium-8057-linux-x64.tar.gz"
-        SHA256="800414a1fa27f2bcab4999d0a7c12fa9e0a0d34999fa07468203adf5f032113b"
+        SHA256="2a16bd506d9e680c7acdb4a3229dba6b75eab624f1a345aca5cd21c557b853aa"
         ;;
     *)
         echo "error: no prebuilt PDFium for $(uname -s)/$(uname -m); run scripts/build_pdfium.sh" >&2
