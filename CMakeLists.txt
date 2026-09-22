@@ -94,8 +94,12 @@ endif()
 # Chromium itself uses — links them. Falls back to the default linker
 # when lld is absent (a PDF-less build still links fine).
 if(NOT APPLE)
+    find_program(LISA_MOLD NAMES ld.mold mold)
     find_program(LISA_LLD NAMES ld.lld lld)
-    if(LISA_LLD)
+    if(LISA_MOLD)
+        add_link_options(-fuse-ld=mold)
+        message(STATUS "Linking with mold (${LISA_MOLD})")
+    elseif(LISA_LLD)
         add_link_options(-fuse-ld=lld)
         message(STATUS "Linking with lld (${LISA_LLD})")
     endif()

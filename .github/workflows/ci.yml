@@ -103,10 +103,10 @@ jobs:
       - name: Toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y lld
+          sudo apt-get install -y lld mold
           uname -m
           cc --version
-          ld.lld --version
+          ld.lld --version; ld.mold --version | head -1
           cmake --version
 
       - name: Fetch PDFium (prebuilt, SHA-256 verified)
@@ -115,20 +115,14 @@ jobs:
         run: scripts/fetch_pdfium.sh
 
       - name: Configure
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DLISA_REQUIRE_PDF=OFF -DLISA_MODELS_DIR=/nonexistent
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DLISA_REQUIRE_PDF=ON -DLISA_MODELS_DIR=/nonexistent
 
       - name: Build
         run: cmake --build build -j "$(nproc)"
 
-      # TEMPORARY: understand the null static initializer.
-      - name: Diagnose startup crash
-        run: |
-          sudo apt-get install -y gdb binutils
-          echo "=== ld.lld version ==="; ld.lld --version
-          echo "=== .init_array bytes ==="; readelf -x .init_array ./build/lisa || true
-          echo "=== legacy .ctors present? ==="; readelf -SW ./build/lisa | grep -iE "ctors|init_array|preinit" || true
-          echo "=== relocations into .init_array ==="; readelf -rW ./build/lisa | grep -iE "init_array|RELATIVE" | head || true
-          echo "=== gdb backtrace ==="; gdb -batch -ex run -ex bt -ex quit --args ./build/lisa --version || true
+      # Fail fast if the PDFium-linked binary crashes at startup.
+      - name: Startup check
+        run: ./build/lisa --version
 
       # test_gui needs a browser; it is exercised on macOS. Model tests
       # self-skip without models.
