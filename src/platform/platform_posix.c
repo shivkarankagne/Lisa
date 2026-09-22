@@ -21,6 +21,7 @@
 #include <sys/file.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
 #ifdef __APPLE__
@@ -492,6 +493,17 @@ char* lisa_executable_path(void) {
 #else
     return realpath("/proc/self/exe", NULL);
 #endif
+}
+
+int64_t lisa_process_id(void) {
+    return (int64_t)getpid();
+}
+
+int lisa_process_alive(int64_t pid) {
+    if (pid <= 0) return 0;
+    /* Signal 0 checks for the process without sending anything. */
+    if (kill((pid_t)pid, 0) == 0) return 1;
+    return errno == EPERM;   /* exists but owned by another user */
 }
 
 int lisa_random_bytes(void* buf, size_t n) {

@@ -191,6 +191,16 @@ char* lisa_default_data_dir(void);
 /* Absolute path of the running executable, malloc'd; NULL if unknown. */
 char* lisa_executable_path(void);
 
+/* The current process id. */
+int64_t lisa_process_id(void);
+
+/*
+ * Whether a process with this id exists. Used to tell a live server's
+ * record from one a crash left behind. A best effort: 1 if it certainly
+ * exists, 0 otherwise.
+ */
+int lisa_process_alive(int64_t pid);
+
 /* Fill buf with n cryptographically secure random bytes. */
 int lisa_random_bytes(void* buf, size_t n);
 

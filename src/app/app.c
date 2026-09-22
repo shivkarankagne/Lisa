@@ -6,8 +6,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <signal.h>
-#include <unistd.h>
 
 #include "yyjson.h"
 #include "../platform/platform.h"
@@ -328,7 +326,7 @@ int app_server_announce(const app_t* app, int port, const char* token) {
     free(path);
     if (f == NULL) return LISA_E_IO;
     fprintf(f, "{\"port\": %d, \"pid\": %lld, \"token\": \"%s\"}\n", port,
-            (long long)getpid(), token ? token : "");
+            (long long)lisa_process_id(), token ? token : "");
     int rc = lisa_file_sync(f) == LISA_PLAT_OK ? LISA_OK : LISA_E_IO;
     fclose(f);
     return rc;
@@ -352,7 +350,7 @@ int app_server_running(const app_t* app, int* port) {
         int64_t pid = yyjson_get_sint(yyjson_obj_get(root, "pid"));
         int64_t p = yyjson_get_sint(yyjson_obj_get(root, "port"));
         /* A file left behind by a crash names a process that is gone. */
-        if (pid > 0 && kill((pid_t)pid, 0) == 0) {
+        if (pid > 0 && lisa_process_alive(pid)) {
             alive = 1;
             if (port) *port = (int)p;
         }

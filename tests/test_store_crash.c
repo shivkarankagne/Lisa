@@ -165,8 +165,7 @@ static int trial(const char* scratch, int t, unsigned seed) {
     close(p[1]);
 
     srand(seed);
-    useconds_t delay = (useconds_t)(1000 + rand() % 150000); /* 1-151 ms */
-    usleep(delay);
+    lisa_sleep_ms(1 + rand() % 151); /* 1-151 ms */
     kill(pid, SIGKILL);
     int status = 0;
     waitpid(pid, &status, 0);

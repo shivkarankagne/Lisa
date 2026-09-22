@@ -10,9 +10,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+
+#include "../src/platform/platform.h"
 
 #include "unity.h"
 #include "civetweb.h"
@@ -95,7 +98,7 @@ static int http_at(int port, const char* method, const char* path, const char* e
         g_body[len] = '\0';
         if (g_read_until == NULL || strstr(g_body, g_read_until) != NULL) break;
         if (time(NULL) >= deadline) break;
-        usleep(100000);   /* the model is still generating */
+        lisa_sleep_ms(100);   /* the model is still generating */
     }
     g_body[len] = '\0';
     mg_close_connection(c);
@@ -412,7 +415,7 @@ static void test_ingest_search_ask(void) {
         TEST_ASSERT_EQUAL_INT(200, http("GET", path, NULL, 1, NULL));
         field("job.state", b, sizeof(b));
         done = strcmp(b, "succeeded") == 0 || strcmp(b, "failed") == 0;
-        if (!done) usleep(200000);
+        if (!done) lisa_sleep_ms(200);
     }
     TEST_ASSERT_EQUAL_STRING("succeeded", b);
     TEST_ASSERT_EQUAL_STRING("2", field("job.files_added", b, sizeof(b)));
@@ -455,12 +458,14 @@ int main(int argc, char** argv) {
         return 2;
     }
     mkdir(argv[1], 0755);
-    /* The API takes absolute paths only. */
-    static char scratch[1024], fixtures[1024];
+    /* The API takes absolute paths only. realpath may write up to
+     * PATH_MAX bytes, and glibc's fortified realpath aborts if the buffer
+     * is smaller than that (PATH_MAX is 4096 on Linux, 1024 on macOS). */
+    static char scratch[PATH_MAX], fixtures[PATH_MAX];
     if (!realpath(argv[1], scratch) || !realpath(argv[2], fixtures)) return 2;
     g_scratch = scratch;
     g_fixtures = fixtures;
-    static char models[1024];
+    static char models[PATH_MAX];
     g_models = realpath(argv[3], models) ? models : argv[3];
     char data[800];
     snprintf(data, sizeof(data), "%s/http_data_%d", g_scratch, (int)getpid());

@@ -13,7 +13,13 @@
 #   ctest --test-dir build-asan --output-on-failure
 
 cmake_minimum_required(VERSION 3.20)
-project(lisa VERSION 0.6.0 LANGUAGES C CXX ASM OBJC)
+# Objective-C is only used on macOS (platform_macos.m, Apple Vision OCR).
+# Other toolchains (e.g. gcc on Linux) have no Objective-C compiler, so
+# enabling it unconditionally fails configuration there.
+project(lisa VERSION 0.6.0 LANGUAGES C CXX ASM)
+if(APPLE)
+    enable_language(OBJC)
+endif()
 
 option(LISA_SANITIZE         "Build with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
 option(LISA_BUILD_TESTS      "Build tests"      ON)
@@ -52,8 +58,13 @@ foreach(opt LLAMA_BUILD_COMMON LLAMA_BUILD_TESTS LLAMA_BUILD_TOOLS
             LLAMA_BUILD_UI GGML_NATIVE GGML_OPENMP GGML_CCACHE)
     set(${opt} OFF CACHE BOOL "" FORCE)
 endforeach()
-set(GGML_METAL               ON CACHE BOOL "" FORCE)
-set(GGML_METAL_EMBED_LIBRARY ON CACHE BOOL "" FORCE)
+# Metal is Apple's GPU backend. On other platforms llama.cpp falls back
+# to its portable CPU backend, which is all a headless Linux build needs
+# for now; a GPU backend (CUDA, Vulkan) is a later, separate choice.
+if(APPLE)
+    set(GGML_METAL               ON CACHE BOOL "" FORCE)
+    set(GGML_METAL_EMBED_LIBRARY ON CACHE BOOL "" FORCE)
+endif()
 add_subdirectory(third_party/llama.cpp EXCLUDE_FROM_ALL)
 
 # LISA's own code: warnings on.
@@ -64,10 +75,17 @@ add_compile_options(
 
 # ---- platform / architecture -------------------------------------------
 
-if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64|ARM64)$")
+# ARM64 (Apple Silicon) is the 1.0 target (plan decision 10). x86-64 is
+# allowed for the Linux port (decision 20): the scalar kernel is the
+# portable reference, so the NEON/assembly paths simply are not built
+# there. Any other architecture is untested and refused.
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64|ARM64)$")
+    set(LISA_ARCH_ARM64 ON)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|amd64|AMD64)$")
+    set(LISA_ARCH_X86_64 ON)
+else()
     message(FATAL_ERROR
-        "LISA 1.0 targets ARM64 only (plan decision 10). "
-        "Detected: ${CMAKE_SYSTEM_PROCESSOR}")
+        "LISA supports ARM64 and x86-64. Detected: ${CMAKE_SYSTEM_PROCESSOR}")
 endif()
 
 # ---- third-party (see third_party/README.md) ---------------------------
@@ -170,7 +188,6 @@ add_library(lisa_core STATIC
     src/platform/platform_posix.c
     src/kernels/registry.c
     src/kernels/kernels_scalar.c
-    src/kernels/arm64/l2_neon.c
     src/retrieval/retrieval_scalar.c
     src/retrieval/retrieval_search.c
     src/retrieval/fusion.c
@@ -180,15 +197,35 @@ add_library(lisa_core STATIC
     src/context/context.c
     src/storage/storage.c
     src/storage/store.c
-    src/kernels/arm64/lisa_asm_wrapper.c
-    src/kernels/arm64/lisa_ultra_mac.s
 )
+
+# NEON is ARM-only; its source is self-guarded but need not be fed to a
+# non-ARM compiler at all. The assembly kernel is Apple-ARM64 only and is
+# a test-only path (plan D2), so it is excluded everywhere else.
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "arm64|aarch64")
+    target_sources(lisa_core PRIVATE src/kernels/arm64/l2_neon.c)
+    if(APPLE)
+        target_sources(lisa_core PRIVATE
+            src/kernels/arm64/lisa_asm_wrapper.c
+            src/kernels/arm64/lisa_ultra_mac.s)
+        set(LISA_HAVE_ASM_KERNEL ON)
+    endif()
+endif()
+# Where the assembly kernel is absent, its test-only entry point is
+# provided by a scalar stand-in so the differential tests still link.
+if(NOT LISA_HAVE_ASM_KERNEL)
+    target_sources(lisa_core PRIVATE src/kernels/search_asm_portable.c)
+endif()
 target_include_directories(lisa_core PUBLIC include src)
 target_link_libraries(lisa_core PUBLIC lisa_sqlite m PRIVATE llama vendor::hash lisa_md4c lisa_utf8proc lisa_miniz)
 if(APPLE)
+    # macOS: the folder picker, drag-drop, and Apple Vision OCR.
     target_sources(lisa_core PRIVATE src/platform/platform_macos.m)
     set_source_files_properties(src/platform/platform_macos.m PROPERTIES COMPILE_OPTIONS "-fno-objc-arc")
     target_link_libraries(lisa_core PUBLIC "-framework Cocoa" "-framework Vision")
+else()
+    # No system recogniser: scanned pages are reported as having no text.
+    target_sources(lisa_core PRIVATE src/platform/platform_ocr_none.c)
 endif()
 if(LISA_HAVE_PDFIUM)
     target_sources(lisa_core PRIVATE src/documents/pdf.c)
@@ -234,6 +271,14 @@ if(LISA_BUILD_TESTS)
     enable_testing()
     set(LISA_MODELS_DIR "${CMAKE_SOURCE_DIR}/models" CACHE PATH "Directory with the default model files")
 
+    # Tests use POSIX functions (strdup, getpid, realpath, symlink) that
+    # glibc hides under a strict -std=c11 (CMAKE_C_EXTENSIONS is OFF); the
+    # product declares them per file the same way. Without this, strdup is
+    # implicitly declared as returning int on Linux, its pointer is
+    # truncated to 32 bits, and the test crashes. Applies only to targets
+    # defined below, not to the product compiled above. No effect on macOS.
+    add_compile_definitions(_DEFAULT_SOURCE)
+
     add_library(lisa_unity STATIC third_party/unity/unity.c)
     target_include_directories(lisa_unity PUBLIC third_party/unity)
     target_compile_options(lisa_unity PRIVATE -w)
@@ -245,12 +290,17 @@ if(LISA_BUILD_TESTS)
     endfunction()
 
     lisa_c_test(test_retrieval)
-    lisa_c_test(test_retrieval_asm)
     lisa_c_test(test_edge_cases)
     lisa_c_test(test_storage)
     lisa_c_test(test_storage_mutation)
-    lisa_c_test(test_kernel_abi tests/kernel_abi_probe.s)
     lisa_c_test(test_kernels)
+    # These exercise the assembly kernel itself, so they run only where it
+    # is built (Apple ARM64). Elsewhere the differential tests above use
+    # the scalar stand-in for lisa_search_exact_asm.
+    if(LISA_HAVE_ASM_KERNEL)
+        lisa_c_test(test_retrieval_asm)
+        lisa_c_test(test_kernel_abi tests/kernel_abi_probe.s)
+    endif()
     add_executable(test_platform tests/test_platform.c)
     target_link_libraries(test_platform PRIVATE lisa_core)
     add_test(NAME test_platform COMMAND test_platform ${CMAKE_BINARY_DIR}/scratch)
@@ -340,9 +390,11 @@ if(LISA_BUILD_TESTS)
     add_test(NAME test_search_scalar COMMAND test_search)
     set_tests_properties(test_search_scalar PROPERTIES ENVIRONMENT "LISA_KERNEL=scalar")
 
-    add_executable(fuzz_retrieval_asm tests/fuzz_retrieval_asm.c)
-    target_link_libraries(fuzz_retrieval_asm PRIVATE lisa_core)
-    add_test(NAME fuzz_retrieval_asm COMMAND fuzz_retrieval_asm 1000 12345)
+    if(LISA_HAVE_ASM_KERNEL)
+        add_executable(fuzz_retrieval_asm tests/fuzz_retrieval_asm.c)
+        target_link_libraries(fuzz_retrieval_asm PRIVATE lisa_core)
+        add_test(NAME fuzz_retrieval_asm COMMAND fuzz_retrieval_asm 1000 12345)
+    endif()
 
     # Helpers for the end-to-end shell tests.
     add_executable(gen_test_data tests/gen_test_data.c)
