@@ -421,8 +421,11 @@ static void test_scanned_pdf_ocr(void) {
     TEST_ASSERT_EQUAL_INT(DOC_OK, doc_extract(path, &t));
     TEST_ASSERT_EQUAL_INT64(2, t.n_pages);
     if (!lisa_ocr_available()) {
-        /* No recogniser on this platform: the scanned pages have no text. */
-        TEST_ASSERT_EQUAL_INT64(0, (int64_t)strspn(t.text, "\n"));
+        /* No recogniser on this platform: the scanned pages yield no
+         * readable text (only page separators), so none of the words are
+         * extracted. */
+        TEST_ASSERT_NULL(strstr(t.text, "RENT AGREEMENT"));
+        TEST_ASSERT_NULL(strstr(t.text, "Rs. 2,000"));
         doc_text_free(&t);
         TEST_IGNORE_MESSAGE("no OCR on this platform");
     }

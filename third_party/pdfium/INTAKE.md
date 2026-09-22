@@ -1,11 +1,21 @@
 # PDFium — intake record
 
-PDFium is **built from source** by `scripts/build_pdfium.sh`. The result
-is published once as a prebuilt archive, which developers and CI download
-and verify with `scripts/fetch_pdfium.sh` into `.deps/pdfium` (not
-committed). No static macOS library is published
-(pdfium-binaries ships only `libpdfium.dylib`), and a separate dylib would
-break the single-executable rule.
+PDFium is **built from source** by `scripts/build_pdfium.sh`, once per
+platform, and each result is published as a prebuilt archive that
+developers and CI download and verify with `scripts/fetch_pdfium.sh` into
+`.deps/pdfium` (not committed). pdfium-binaries ships only shared
+libraries (`libpdfium.dylib` on macOS, `libpdfium.so` on Linux), and a
+shared library would break the single-executable rule, so LISA links its
+own static `libpdfium.a`. The macOS archive is built and published by
+hand; the Linux archive is built and published by
+`.github/workflows/build-pdfium-linux.yml`.
+
+## Published archives
+
+| Platform | Asset (release tag `deps-<asset>`) | SHA-256 |
+| :--- | :--- | :--- |
+| macOS arm64 | `pdfium-chromium-8057-mac-arm64.tar.gz` | `07ae3e816fee0626ffd1c31cc3b10be3bbadccad3eb3033691b777d1dd5c0ba9` |
+| Linux x64 | `pdfium-chromium-8057-linux-x64.tar.gz` | `e1200afa122fcef4e054d1e173d307b90f1f2c2b7559efa4a7a9c7558b56a1a9` |
 
 | Field | Value |
 | :--- | :--- |

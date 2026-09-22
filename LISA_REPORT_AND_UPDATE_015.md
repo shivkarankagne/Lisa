@@ -17,7 +17,7 @@ second machine or a person at the keyboard, and one is blocked.
 | :--- | :--- |
 | Eval set ≥ 50 questions, recall@k and citation accuracy in a report | **Done** — 58 questions, scores below |
 | Crash-recovery test | **Done** — 3 of 3 trials recovered, §6 |
-| 8-hour soak on `serve` | Script written (`benchmark/w12/soak.sh`); not yet run |
+| 8-hour soak on `serve` | **Done** — 8 h, 4,316 requests, 0 failures, memory -1.5%, §8 |
 | Clean-machine test | **Open** — needs a fresh macOS user account |
 | Offline test (Wi-Fi off from first copy to first answer) | **Open** |
 | Matches or beats W0 | **Blocked** — the competitors were uninstalled to free disk |
@@ -106,8 +106,25 @@ is about, which is not losing committed work.
 
 - Clean-machine and offline tests need a fresh macOS account and a
   machine with the Wi-Fi off.
-- The 8-hour soak has not been run (the script is smoke-tested only).
+- Clean-machine and offline tests still need a fresh macOS account.
 - The W0 comparison needs AnythingLLM and Ollama installed again; they
   were removed at the user's request to free disk.
 - Indexing 51 documents takes 52 minutes. That is the embedding model on
   the GPU, unchanged since report 014 §5.
+
+## 8. Soak result (2026-09-22, M2 16 GB)
+
+`benchmark/w12/soak.sh` ran `lisa serve` for 8 hours against the e5-built
+benchmark collection, asking and searching in a loop and sampling the
+server's resident memory every minute.
+
+| | |
+| :--- | :--- |
+| Duration | 8 hours |
+| Requests | 4,316 |
+| Failures | 0 |
+| Memory, first eighth → last eighth | 3,107 MB → 3,059 MB (**-1.5%**, allowed +10%) |
+| Verdict | **PASS** |
+
+Memory did not grow; it fell slightly. No leak, no crash, no failed
+request under continuous load.

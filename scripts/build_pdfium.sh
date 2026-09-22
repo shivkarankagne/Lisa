@@ -60,6 +60,17 @@ fi
 gclient sync --no-history --shallow --revision "pdfium@$PDFIUM_COMMIT"
 
 cd pdfium
+# Chromium enables CREL (compact) relocations on Linux x64 by passing
+# -Wa,--crel,--allow-experimental-crel to the assembler, but only because
+# it links with its own lld. CREL is a 2024 format the host linkers here
+# do not handle, so LISA cannot link the resulting libpdfium.a. lld is
+# required for Chromium's own build (its bundled sysroot needs it), so
+# rather than disable lld the flag itself is removed from the fetched
+# build config; the objects then use ordinary relocations.
+find build -name '*.gn' -o -name '*.gni' 2>/dev/null \
+    | xargs grep -l -- '--allow-experimental-crel' 2>/dev/null \
+    | xargs -r sed -i '/--allow-experimental-crel/d'
+
 gn gen out/lisa --args="
     is_debug=false
     symbol_level=0
@@ -75,7 +86,29 @@ gn gen out/lisa --args="
     clang_use_chrome_plugins=false
     treat_warnings_as_errors=false
     use_remoteexec=false
+    use_thin_lto=false
+    is_cfi=false
+    use_allocator_shim=false
+    use_partition_alloc_as_malloc=false
 "
+# Thin-LTO (Chromium's default) leaves LLVM bitcode in the object files,
+# which the LLVM linker can read but GNU ld (the default on Linux) cannot
+# ("unknown architecture of input file"). Disabling it, and CFI which
+# depends on it, makes libpdfium.a a plain native archive that any linker
+# accepts. It also keeps the two platforms' archives built the same way.
+#
+# use_allocator_shim / use_partition_alloc_as_malloc: Chromium's
+# PartitionAlloc otherwise overrides global malloc/free through static
+# initializers, which crashes any non-Chromium program that links PDFium
+# — every LISA binary segfaulted at startup on Linux until these were
+# turned off. PDFium then uses the system allocator.
+#
+# The CREL relocations are stripped above (see the sed on the fetched
+# build config): Chromium adds them on Linux x64 under lld, a 2024 format
+# GNU ld, mold and lld here cannot all handle, so LISA could not link the
+# archive. Removing the flag while keeping lld (which Chromium's own build
+# needs) leaves ordinary relocations that any linker reads. ARM is
+# excluded upstream, which is why macOS was unaffected.
 ninja -C out/lisa pdfium
 
 rm -rf "$OUT"

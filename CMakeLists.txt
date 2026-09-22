@@ -88,6 +88,23 @@ else()
         "LISA supports ARM64 and x86-64. Detected: ${CMAKE_SYSTEM_PROCESSOR}")
 endif()
 
+# On Linux, link with LLVM's lld when it is present. The static PDFium is
+# built with Chromium's clang, and its (native ELF) objects use features
+# that GNU ld rejects as "unknown architecture"; lld — the linker
+# Chromium itself uses — links them. Falls back to the default linker
+# when lld is absent (a PDF-less build still links fine).
+if(NOT APPLE)
+    find_program(LISA_MOLD NAMES ld.mold mold)
+    find_program(LISA_LLD NAMES ld.lld lld)
+    if(LISA_MOLD)
+        add_link_options(-fuse-ld=mold)
+        message(STATUS "Linking with mold (${LISA_MOLD})")
+    elseif(LISA_LLD)
+        add_link_options(-fuse-ld=lld)
+        message(STATUS "Linking with lld (${LISA_LLD})")
+    endif()
+endif()
+
 # ---- third-party (see third_party/README.md) ---------------------------
 
 add_library(lisa_sqlite STATIC third_party/sqlite/sqlite3.c)
@@ -149,8 +166,9 @@ target_include_directories(lisa_utf8proc PUBLIC third_party/utf8proc)
 target_compile_definitions(lisa_utf8proc PUBLIC UTF8PROC_STATIC)
 target_compile_options(lisa_utf8proc PRIVATE -w)
 
-# PDFium: built from source by scripts/build_pdfium.sh (no static library
-# is published for macOS). Required for PDF support.
+# PDFium: a static library built from source by scripts/build_pdfium.sh
+# (pdfium-binaries ships only shared libraries) and fetched per platform
+# by scripts/fetch_pdfium.sh. Required for PDF support.
 set(LISA_PDFIUM_DIR "${CMAKE_SOURCE_DIR}/.deps/pdfium" CACHE PATH "Static PDFium build")
 option(LISA_REQUIRE_PDF "Fail if PDFium is not available" ON)
 if(EXISTS "${LISA_PDFIUM_DIR}/lib/libpdfium.a")
@@ -163,6 +181,11 @@ if(EXISTS "${LISA_PDFIUM_DIR}/lib/libpdfium.a")
         target_link_libraries(lisa_pdfium INTERFACE
             "-framework AppKit" "-framework CoreFoundation" "-framework CoreGraphics"
             "-framework Foundation" "-framework Security")
+    else()
+        # The static PDFium (built with use_custom_libcxx=false) uses the
+        # system C++ runtime and needs threads and dlopen.
+        find_package(Threads REQUIRED)
+        target_link_libraries(lisa_pdfium INTERFACE Threads::Threads ${CMAKE_DL_LIBS})
     endif()
 elseif(LISA_REQUIRE_PDF)
     message(FATAL_ERROR

@@ -12,19 +12,30 @@
 
 set -euo pipefail
 
-TAG="deps-pdfium-chromium-8057-mac-arm64"
-ASSET="pdfium-chromium-8057-mac-arm64.tar.gz"
-SHA256="07ae3e816fee0626ffd1c31cc3b10be3bbadccad3eb3033691b777d1dd5c0ba9"
 COMMIT="a5a7089234f121990b336b3841008009dca143bf"
 REPO="${LISA_DEPS_REPO:-shivkarankagne/Lisa}"
 
+# The prebuilt static library per platform. Each is built from the same
+# pinned commit by scripts/build_pdfium.sh and published as a release
+# asset (macOS by hand, Linux by build-pdfium-linux.yml).
+case "$(uname -s)/$(uname -m)" in
+    Darwin/arm64)
+        ASSET="pdfium-chromium-8057-mac-arm64.tar.gz"
+        SHA256="07ae3e816fee0626ffd1c31cc3b10be3bbadccad3eb3033691b777d1dd5c0ba9"
+        ;;
+    Linux/x86_64)
+        ASSET="pdfium-chromium-8057-linux-x64.tar.gz"
+        SHA256="e1200afa122fcef4e054d1e173d307b90f1f2c2b7559efa4a7a9c7558b56a1a9"
+        ;;
+    *)
+        echo "error: no prebuilt PDFium for $(uname -s)/$(uname -m); run scripts/build_pdfium.sh" >&2
+        exit 1
+        ;;
+esac
+TAG="deps-${ASSET%.tar.gz}"
+
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="${1:-$ROOT/.deps/pdfium}"
-
-if [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
-    echo "error: no prebuilt PDFium for $(uname -s)/$(uname -m); run scripts/build_pdfium.sh" >&2
-    exit 1
-fi
 
 if [ -f "$OUT/lib/libpdfium.a" ] && grep -q "commit=$COMMIT" "$OUT/VERSION" 2>/dev/null; then
     echo "PDFium already present: $OUT"
