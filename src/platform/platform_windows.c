@@ -24,6 +24,8 @@
 #include <windows.h>
 #include <bcrypt.h>
 #include <shlobj.h>      /* SHGetKnownFolderPath */
+#include <shellapi.h>    /* ShellExecuteW */
+#include <io.h>          /* _get_osfhandle */
 
 #include <stdlib.h>
 #include <string.h>
