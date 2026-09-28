@@ -187,3 +187,34 @@ jobs:
 
       - name: Test (with models; only the browser GUI test is skipped)
         run: ctest --test-dir build --output-on-failure --timeout 3600 -E "test_gui"
+
+  # First step of the Windows port (plan W13): prove the Win32 platform
+  # backend and the core compile and the binary runs. Headless, no PDF, no
+  # models, tests off for now (many use POSIX-only calls). Built with Clang
+  # (MSVC ABI) because the kernel registry uses C11 atomics, which MSVC
+  # supports only experimentally.
+  windows-x64:
+    name: Windows x64 (headless, no PDF/models)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          clang --version
+          cmake --version
+          ninja --version
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+          -DLISA_BUILD_TESTS=OFF -DLISA_REQUIRE_PDF=OFF
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Startup check
+        run: build/lisa.exe --version

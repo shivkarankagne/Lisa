@@ -34,8 +34,12 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 
 # Product optimisation level is -O2 (plan W1). Asserts stay enabled.
-set(CMAKE_C_FLAGS_RELEASE "-O2 -g")
-set(CMAKE_C_FLAGS_DEBUG   "-O0 -g")
+# These are GCC/Clang flags; MSVC (should it ever be used) keeps its
+# defaults. Windows builds use Clang, which accepts them.
+if(NOT MSVC)
+    set(CMAKE_C_FLAGS_RELEASE "-O2 -g")
+    set(CMAKE_C_FLAGS_DEBUG   "-O0 -g")
+endif()
 
 # Sanitizers apply to everything, including third-party code.
 if(LISA_SANITIZE)
@@ -67,11 +71,13 @@ if(APPLE)
 endif()
 add_subdirectory(third_party/llama.cpp EXCLUDE_FROM_ALL)
 
-# LISA's own code: warnings on.
-add_compile_options(
-    $<$<COMPILE_LANGUAGE:C>:-Wall>
-    $<$<COMPILE_LANGUAGE:C>:-Wextra>
-)
+# LISA's own code: warnings on (GCC/Clang flags).
+if(NOT MSVC)
+    add_compile_options(
+        $<$<COMPILE_LANGUAGE:C>:-Wall>
+        $<$<COMPILE_LANGUAGE:C>:-Wextra>
+    )
+endif()
 
 # ---- platform / architecture -------------------------------------------
 
@@ -93,7 +99,7 @@ endif()
 # that GNU ld rejects as "unknown architecture"; lld — the linker
 # Chromium itself uses — links them. Falls back to the default linker
 # when lld is absent (a PDF-less build still links fine).
-if(NOT APPLE)
+if(UNIX AND NOT APPLE)
     find_program(LISA_MOLD NAMES ld.mold mold)
     find_program(LISA_LLD NAMES ld.lld lld)
     if(LISA_MOLD)
@@ -150,6 +156,9 @@ target_compile_definitions(lisa_civetweb PUBLIC NO_SSL NO_CGI NO_FILES NO_CACHIN
 target_compile_options(lisa_civetweb PRIVATE -w)
 find_package(Threads REQUIRED)
 target_link_libraries(lisa_civetweb PUBLIC Threads::Threads)
+if(WIN32)
+    target_link_libraries(lisa_civetweb PUBLIC ws2_32)   # Winsock
+endif()
 
 # webview (third_party/webview/INTAKE.md): native window for `lisa gui`.
 if(APPLE)
@@ -208,7 +217,6 @@ add_library(lisa_core STATIC
     src/documents/chunk.c
     src/documents/docx.c
     src/ingest/ingest.c
-    src/platform/platform_posix.c
     src/kernels/registry.c
     src/kernels/kernels_scalar.c
     src/retrieval/retrieval_scalar.c
@@ -239,8 +247,23 @@ endif()
 if(NOT LISA_HAVE_ASM_KERNEL)
     target_sources(lisa_core PRIVATE src/kernels/search_asm_portable.c)
 endif()
+# The OS abstraction: Win32 on Windows, POSIX on macOS and Linux.
+if(WIN32)
+    target_sources(lisa_core PRIVATE src/platform/platform_windows.c)
+else()
+    target_sources(lisa_core PRIVATE src/platform/platform_posix.c)
+endif()
+
 target_include_directories(lisa_core PUBLIC include src)
-target_link_libraries(lisa_core PUBLIC lisa_sqlite m PRIVATE llama vendor::hash lisa_md4c lisa_utf8proc lisa_miniz)
+# libm is a separate library only on Unix; it is part of the CRT on MSVC.
+if(WIN32)
+    target_link_libraries(lisa_core PUBLIC lisa_sqlite PRIVATE llama vendor::hash lisa_md4c lisa_utf8proc lisa_miniz)
+    # Win32 backends: BCryptGenRandom, SHGetKnownFolderPath/CoTaskMemFree,
+    # ShellExecute.
+    target_link_libraries(lisa_core PRIVATE bcrypt shell32 ole32)
+else()
+    target_link_libraries(lisa_core PUBLIC lisa_sqlite m PRIVATE llama vendor::hash lisa_md4c lisa_utf8proc lisa_miniz)
+endif()
 if(APPLE)
     # macOS: the folder picker, drag-drop, and Apple Vision OCR.
     target_sources(lisa_core PRIVATE src/platform/platform_macos.m)
