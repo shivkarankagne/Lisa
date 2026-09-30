@@ -216,14 +216,12 @@ jobs:
       - name: Build
         run: cmake --build build -j
 
-      # Excluded (tracked, still being fixed): test_store has
-      # compaction/migrate failures on Windows and test_http returns 400
-      # for static files. GUI/CLI tests need a browser/bash.
+      # GUI/CLI tests need a browser/bash.
       - name: Test (Windows-clean subset)
         shell: bash
         run: >
           ctest --test-dir build --output-on-failure --timeout 900
-          -E "test_gui|test_cli|test_http|test_store$|test_store_crash"
+          -E "test_gui|test_cli|test_store_crash"
 
       - name: Startup check
         run: build/lisa.exe --version
