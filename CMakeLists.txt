@@ -432,14 +432,20 @@ if(LISA_BUILD_TESTS)
     target_link_libraries(test_sqlite PRIVATE lisa_core lisa_sqlite lisa_unity)
     add_test(NAME test_sqlite COMMAND test_sqlite ${CMAKE_BINARY_DIR}/scratch)
 
-    add_executable(test_models tests/test_models.c)
-    target_link_libraries(test_models PRIVATE lisa_core llama lisa_unity)
-    add_test(NAME test_models COMMAND test_models ${CMAKE_BINARY_DIR}/scratch ${LISA_MODELS_DIR})
-    set_tests_properties(test_models PROPERTIES TIMEOUT 1800)
+    # These include llama.h directly, whose ggml header uses
+    # __declspec(noreturn) and does not compile under Clang on Windows in
+    # a Unity test TU. llama on Windows is covered by the models smoke;
+    # these run on macOS and Linux.
+    if(NOT WIN32)
+        add_executable(test_models tests/test_models.c)
+        target_link_libraries(test_models PRIVATE lisa_core llama lisa_unity)
+        add_test(NAME test_models COMMAND test_models ${CMAKE_BINARY_DIR}/scratch ${LISA_MODELS_DIR})
+        set_tests_properties(test_models PROPERTIES TIMEOUT 1800)
 
-    add_executable(test_llama_link tests/test_llama_link.c)
-    target_link_libraries(test_llama_link PRIVATE llama lisa_unity)
-    add_test(NAME test_llama_link COMMAND test_llama_link)
+        add_executable(test_llama_link tests/test_llama_link.c)
+        target_link_libraries(test_llama_link PRIVATE llama lisa_unity)
+        add_test(NAME test_llama_link COMMAND test_llama_link)
+    endif()
     lisa_c_test(test_search)
     add_test(NAME test_search_scalar COMMAND test_search)
     set_tests_properties(test_search_scalar PROPERTIES ENVIRONMENT "LISA_KERNEL=scalar")

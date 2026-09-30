@@ -458,15 +458,14 @@ int main(int argc, char** argv) {
         return 2;
     }
     lisa_mkdirs(argv[1]);
-    /* The API takes absolute paths only. realpath may write up to
-     * PATH_MAX bytes, and glibc's fortified realpath aborts if the buffer
-     * is smaller than that (PATH_MAX is 4096 on Linux, 1024 on macOS). */
-    static char scratch[PATH_MAX], fixtures[PATH_MAX];
-    if (!realpath(argv[1], scratch) || !realpath(argv[2], fixtures)) return 2;
-    g_scratch = scratch;
-    g_fixtures = fixtures;
-    static char models[PATH_MAX];
-    g_models = realpath(argv[3], models) ? models : argv[3];
+    /* The API takes absolute paths only; lisa_path_absolute is portable
+     * (realpath on POSIX, GetFullPathName on Windows) and malloc's the
+     * result (leaked at exit, which is fine for a test). */
+    g_scratch = lisa_path_absolute(argv[1]);
+    g_fixtures = lisa_path_absolute(argv[2]);
+    if (g_scratch == NULL || g_fixtures == NULL) return 2;
+    char* models_abs = lisa_path_absolute(argv[3]);   /* may not exist */
+    g_models = models_abs ? models_abs : argv[3];
     char data[800];
     snprintf(data, sizeof(data), "%s/http_data_%d", g_scratch, (int)lisa_process_id());
     if (app_open(&g_app, data, NULL) != LISA_OK) return 1;
