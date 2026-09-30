@@ -216,6 +216,13 @@ jobs:
       - name: Build
         run: cmake --build build -j
 
+      # TEMP (windows-fixes branch): backtrace the storage segfault.
+      - name: Diagnose test_storage segfault
+        shell: bash
+        run: |
+          lldb --version || true
+          lldb --batch -o "run" -o "bt all" -o "quit" -- ./build/test_storage.exe 2>&1 | tail -40 || true
+
       # The Win32 backend is validated by the retrieval, kernel, context,
       # sqlite and search tests. Excluded for now (tracked, being fixed on
       # a branch): test_storage/test_storage_mutation segfault on Windows,
