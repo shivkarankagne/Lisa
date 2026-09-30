@@ -10,7 +10,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <unistd.h>
+#include "posix_compat.h"
+#include "../src/platform/platform.h"
 
 #include "unity.h"
 #include "lisa.h"
@@ -25,7 +26,7 @@ static char g_path[512];
 static int g_seq;
 
 void setUp(void) {
-    snprintf(g_path, sizeof(g_path), "%s/api_%d_%d", g_scratch, (int)getpid(), g_seq++);
+    snprintf(g_path, sizeof(g_path), "%s/api_%d_%d", g_scratch, (int)lisa_process_id(), g_seq++);
 }
 void tearDown(void) {}
 
@@ -498,7 +499,7 @@ int main(int argc, char** argv) {
         return 2;
     }
     g_scratch = argv[1];
-    mkdir(g_scratch, 0755);
+    lisa_mkdirs(g_scratch);
 
     UNITY_BEGIN();
     RUN_TEST(test_version);

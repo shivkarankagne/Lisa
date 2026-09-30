@@ -11,7 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <unistd.h>
+#include "posix_compat.h"
 
 #include "../src/platform/platform.h"
 
@@ -45,9 +45,9 @@ static void on_audit(void* user, const lisa_audit_event_t* ev) {
 }
 
 void setUp(void) {
-    snprintf(g_dir, sizeof(g_dir), "%s/iapi_%d_%d", g_scratch, (int)getpid(), g_seq++);
+    snprintf(g_dir, sizeof(g_dir), "%s/iapi_%d_%d", g_scratch, (int)lisa_process_id(), g_seq++);
     snprintf(g_coll, sizeof(g_coll), "%s.coll", g_dir);
-    mkdir(g_dir, 0755);
+    lisa_mkdirs(g_dir);
 }
 void tearDown(void) {}
 
@@ -303,7 +303,7 @@ int main(int argc, char** argv) {
     }
     g_scratch = argv[1];
     g_fixtures = argv[2];
-    mkdir(g_scratch, 0755);
+    lisa_mkdirs(g_scratch);
     snprintf(g_model_path, sizeof(g_model_path), "%s/Qwen3-Embedding-0.6B-Q8_0.gguf", argv[3]);
     FILE* f = fopen(g_model_path, "rb");
     g_have_model = f != NULL;

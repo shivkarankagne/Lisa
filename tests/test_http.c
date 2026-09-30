@@ -13,7 +13,7 @@
 #include <limits.h>
 #include <sys/stat.h>
 #include <time.h>
-#include <unistd.h>
+#include "posix_compat.h"
 
 #include "../src/platform/platform.h"
 
@@ -395,8 +395,8 @@ static void test_ingest_search_ask(void) {
     g_port = server_port(s);
 
     char docs[900], body[1200], b[256];
-    snprintf(docs, sizeof(docs), "%s/http_docs_%d", g_scratch, (int)getpid());
-    mkdir(docs, 0755);
+    snprintf(docs, sizeof(docs), "%s/http_docs_%d", g_scratch, (int)lisa_process_id());
+    lisa_mkdirs(docs);
     char p[1000];
     snprintf(p, sizeof(p), "%s/pump.txt", docs);
     FILE* f = fopen(p, "wb");
@@ -457,7 +457,7 @@ int main(int argc, char** argv) {
         fprintf(stderr, "usage: %s <scratch_dir> <fixtures_dir> <models_dir>\n", argv[0]);
         return 2;
     }
-    mkdir(argv[1], 0755);
+    lisa_mkdirs(argv[1]);
     /* The API takes absolute paths only. realpath may write up to
      * PATH_MAX bytes, and glibc's fortified realpath aborts if the buffer
      * is smaller than that (PATH_MAX is 4096 on Linux, 1024 on macOS). */
@@ -468,14 +468,14 @@ int main(int argc, char** argv) {
     static char models[PATH_MAX];
     g_models = realpath(argv[3], models) ? models : argv[3];
     char data[800];
-    snprintf(data, sizeof(data), "%s/http_data_%d", g_scratch, (int)getpid());
+    snprintf(data, sizeof(data), "%s/http_data_%d", g_scratch, (int)lisa_process_id());
     if (app_open(&g_app, data, NULL) != LISA_OK) return 1;
 
     /* Point the models at <models_dir> through config.json, as a user would. */
     char e[1024], c[1024];
     snprintf(e, sizeof(e), "%s/Qwen3-Embedding-0.6B-Q8_0.gguf", g_models);
     snprintf(c, sizeof(c), "%s/Qwen3-4B-Q4_K_M.gguf", g_models);
-    g_have_models = access(e, R_OK) == 0 && access(c, R_OK) == 0;
+    g_have_models = lisa_path_exists(e) && lisa_path_exists(c);
     if (g_have_models && (app_set_model(&g_app, APP_MODEL_EMBEDDING, e) != LISA_OK ||
                           app_set_model(&g_app, APP_MODEL_CHAT, c) != LISA_OK))
         return 1;

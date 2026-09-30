@@ -11,7 +11,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <unistd.h>
+#include "posix_compat.h"
+#include "../src/platform/platform.h"
 
 #include "unity.h"
 #include "lisa.h"
@@ -230,8 +231,8 @@ static void test_invalid_arguments(void) {
 }
 
 static int setup_collection(void) {
-    snprintf(g_dir, sizeof(g_dir), "%s/ask_%d", g_scratch, (int)getpid());
-    mkdir(g_dir, 0755);
+    snprintf(g_dir, sizeof(g_dir), "%s/ask_%d", g_scratch, (int)lisa_process_id());
+    lisa_mkdirs(g_dir);
     write_file("pump.txt", "Pump P-7 failed on Tuesday: the main bearing seized after weeks of rising "
                            "vibration. A replacement bearing was ordered from the supplier.");
     write_file("leave.md", "# Leave policy\n\nEmployees are entitled to 24 days of paid annual leave "
@@ -272,11 +273,11 @@ int main(int argc, char** argv) {
     }
     g_scratch = argv[1];
     g_fixtures = argv[2];
-    mkdir(g_scratch, 0755);
+    lisa_mkdirs(g_scratch);
     char embed_path[1024], chat_path[1024];
     snprintf(embed_path, sizeof(embed_path), "%s/Qwen3-Embedding-0.6B-Q8_0.gguf", argv[3]);
     snprintf(chat_path, sizeof(chat_path), "%s/Qwen3-4B-Q4_K_M.gguf", argv[3]);
-    g_have_models = access(embed_path, R_OK) == 0 && access(chat_path, R_OK) == 0;
+    g_have_models = lisa_path_exists(embed_path) && lisa_path_exists(chat_path);
 
     if (lisa_context_create(NULL, &g_ctx) != LISA_OK) return 1;
     int fail = 0;

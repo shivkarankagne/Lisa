@@ -2,7 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include <unistd.h>
+#include "posix_compat.h"
+#include "../src/platform/platform.h"
 #include <sys/stat.h>
 
 #include "../src/storage/storage.h"
@@ -47,7 +48,7 @@ int main(void) {
     /* create */
     int rc = storage_create(dir, n, dim, vectors);
     check("storage_create returns 0", rc == 0);
-    check("directory exists", access(dir, F_OK) == 0);
+    check("directory exists", lisa_path_exists(dir));
 
     /* create on existing directory must fail */
     rc = storage_create(dir, n, dim, vectors);
@@ -114,7 +115,7 @@ int main(void) {
     /* corrupted header */
     const char* bad_dir = "/tmp/lisa_storage_test_bad";
     rm_rf(bad_dir);
-    mkdir(bad_dir, 0755);
+    lisa_mkdirs(bad_dir);
     {
         FILE* f = fopen("/tmp/lisa_storage_test_bad/header.bin", "wb");
         if (f) {

@@ -2,7 +2,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
-#include <unistd.h>
+#include "posix_compat.h"
+#include "../src/platform/platform.h"
 #include <sys/stat.h>
 
 #include "../src/storage/storage.h"
@@ -198,7 +199,7 @@ int main(void) {
     /* --- v1 read-only path --- */
     const char* v1dir = "/tmp/lisa_storage_v1";
     rm_rf(v1dir);
-    mkdir(v1dir, 0755);
+    lisa_mkdirs(v1dir);
     {
         /* craft a v1 header: magic, version=1, n=2, dim=4 */
         unsigned char hdr[16] = {

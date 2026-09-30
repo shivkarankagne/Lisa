@@ -14,7 +14,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <unistd.h>
+#include "posix_compat.h"
+#include "../src/platform/platform.h"
 
 #include "unity.h"
 #include "lisa.h"
@@ -78,7 +79,7 @@ static void make_collection(void) {
         ch[i].length = (int64_t)strlen(texts[i]);
         ch[i].content_hash = "h";
     }
-    snprintf(g_coll, sizeof(g_coll), "%s/query_%d_%d.coll", g_scratch, (int)getpid(), g_seq++);
+    snprintf(g_coll, sizeof(g_coll), "%s/query_%d_%d.coll", g_scratch, (int)lisa_process_id(), g_seq++);
     lisa_collection_t* c = NULL;
     TEST_ASSERT_EQUAL_INT(LISA_OK, lisa_collection_create(g_ctx, g_coll, "m", 4));
     TEST_ASSERT_EQUAL_INT(LISA_OK, lisa_collection_open(g_ctx, g_coll, LISA_OPEN_WRITE, NULL, &c));
@@ -373,8 +374,8 @@ static void write_file(const char* name, const char* text) {
 
 static void test_query_text_real_model(void) {
     NEED_MODEL();
-    snprintf(g_dir, sizeof(g_dir), "%s/qdocs_%d_%d", g_scratch, (int)getpid(), g_seq++);
-    mkdir(g_dir, 0755);
+    snprintf(g_dir, sizeof(g_dir), "%s/qdocs_%d_%d", g_scratch, (int)lisa_process_id(), g_seq++);
+    lisa_mkdirs(g_dir);
     write_file("pump.txt", "Pump P-7 failed on Tuesday: the main bearing seized after weeks of "
                            "rising vibration. Replacement bearing ordered from supplier.");
     write_file("canteen.txt", "The canteen menu changes on Mondays. Lunch is served from noon "
@@ -419,7 +420,7 @@ int main(int argc, char** argv) {
         return 2;
     }
     g_scratch = argv[1];
-    mkdir(g_scratch, 0755);
+    lisa_mkdirs(g_scratch);
     snprintf(g_model_path, sizeof(g_model_path), "%s/Qwen3-Embedding-0.6B-Q8_0.gguf", argv[2]);
     FILE* f = fopen(g_model_path, "rb");
     g_have_model = f != NULL;

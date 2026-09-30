@@ -347,16 +347,24 @@ if(LISA_BUILD_TESTS)
         lisa_c_test(test_retrieval_asm)
         lisa_c_test(test_kernel_abi tests/kernel_abi_probe.s)
     endif()
-    add_executable(test_platform tests/test_platform.c)
-    target_link_libraries(test_platform PRIVATE lisa_core)
-    add_test(NAME test_platform COMMAND test_platform ${CMAKE_BINARY_DIR}/scratch)
+    # test_platform asserts POSIX specifics (symlink creation, flock
+    # semantics) and test_store_crash forks; both are POSIX-only. The
+    # Win32 platform backend is exercised indirectly on Windows by the
+    # storage, ingest and http tests (mmap, file locks, file I/O).
+    if(NOT WIN32)
+        add_executable(test_platform tests/test_platform.c)
+        target_link_libraries(test_platform PRIVATE lisa_core)
+        add_test(NAME test_platform COMMAND test_platform ${CMAKE_BINARY_DIR}/scratch)
+    endif()
 
     add_executable(test_store tests/test_store.c)
     target_link_libraries(test_store PRIVATE lisa_core lisa_unity)
     add_test(NAME test_store COMMAND test_store ${CMAKE_BINARY_DIR}/scratch)
-    add_executable(test_store_crash tests/test_store_crash.c)
-    target_link_libraries(test_store_crash PRIVATE lisa_core)
-    add_test(NAME test_store_crash COMMAND test_store_crash ${CMAKE_BINARY_DIR}/scratch 40)
+    if(NOT WIN32)
+        add_executable(test_store_crash tests/test_store_crash.c)
+        target_link_libraries(test_store_crash PRIVATE lisa_core)
+        add_test(NAME test_store_crash COMMAND test_store_crash ${CMAKE_BINARY_DIR}/scratch 40)
+    endif()
 
     add_executable(test_public_api tests/test_public_api.c)
     target_link_libraries(test_public_api PRIVATE lisa_core lisa_unity)
