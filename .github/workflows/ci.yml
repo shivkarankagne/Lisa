@@ -212,11 +212,13 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
           -DLISA_REQUIRE_PDF=OFF -DLISA_MODELS_DIR=nonexistent
+          "-DCMAKE_C_FLAGS=-gcodeview" "-DCMAKE_EXE_LINKER_FLAGS=-Wl,/debug"
 
       - name: Build
         run: cmake --build build -j
 
-      # TEMP (windows-fixes branch): backtrace the storage segfault with cdb.
+      # TEMP (windows-fixes branch): backtrace the storage segfault with cdb
+      # (symbols via -gcodeview + a PDB).
       - name: Diagnose test_storage segfault
         shell: pwsh
         run: |
@@ -224,7 +226,7 @@ jobs:
           if (-not $cdb) { $cdb = Get-Command cdb -ErrorAction SilentlyContinue }
           if (-not $cdb) { Write-Host "cdb not found"; exit 0 }
           Write-Host "using $($cdb.FullName)"
-          & $cdb.FullName -g -G -c "kb 40; q" .\build\test_storage.exe 2>&1 | Select-Object -Last 60
+          & $cdb.FullName -g -G -c "kn 40; q" .\build\test_storage.exe 2>&1 | Select-Object -Last 70
 
       # The Win32 backend is validated by the retrieval, kernel, context,
       # sqlite and search tests. Excluded for now (tracked, being fixed on
