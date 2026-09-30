@@ -13,7 +13,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <sys/utime.h>
+#else
 #include <sys/time.h>
+#endif
 
 #include "unity.h"
 #include "../src/ingest/ingest.h"
@@ -74,8 +78,13 @@ static void write_text(const char* rel, const char* text) {
 static void set_mtime(const char* rel, long seconds) {
     char path[1000];
     snprintf(path, sizeof(path), "%s/%s", g_root, rel);
+#ifdef _WIN32
+    struct _utimbuf t = { (time_t)seconds, (time_t)seconds };
+    TEST_ASSERT_EQUAL_INT(0, _utime(path, &t));
+#else
     struct timeval tv[2] = { { seconds, 0 }, { seconds, 0 } };
     TEST_ASSERT_EQUAL_INT(0, utimes(path, tv));
+#endif
 }
 
 static void remove_rel(const char* rel) {
