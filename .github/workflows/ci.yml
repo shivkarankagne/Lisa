@@ -216,12 +216,15 @@ jobs:
       - name: Build
         run: cmake --build build -j
 
-      # TEMP (windows-fixes branch): backtrace the storage segfault.
+      # TEMP (windows-fixes branch): backtrace the storage segfault with cdb.
       - name: Diagnose test_storage segfault
-        shell: bash
+        shell: pwsh
         run: |
-          lldb --version || true
-          lldb --batch -o "run" -o "bt all" -o "quit" -- ./build/test_storage.exe 2>&1 | tail -40 || true
+          $cdb = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\cdb.exe" -ErrorAction SilentlyContinue
+          if (-not $cdb) { $cdb = Get-Command cdb -ErrorAction SilentlyContinue }
+          if (-not $cdb) { Write-Host "cdb not found"; exit 0 }
+          Write-Host "using $($cdb.FullName)"
+          & $cdb.FullName -g -G -c "kb 40; q" .\build\test_storage.exe 2>&1 | Select-Object -Last 60
 
       # The Win32 backend is validated by the retrieval, kernel, context,
       # sqlite and search tests. Excluded for now (tracked, being fixed on
