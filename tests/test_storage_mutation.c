@@ -24,7 +24,11 @@ static void check(const char* name, int cond) {
 
 static int rm_rf(const char* path) {
     char cmd[512];
+#ifdef _WIN32
+    snprintf(cmd, sizeof(cmd), "rmdir /s /q \"%s\" >nul 2>&1", path);
+#else
     snprintf(cmd, sizeof(cmd), "rm -rf '%s'", path);
+#endif
     return system(cmd);
 }
 
@@ -50,7 +54,7 @@ static int verify_vectors_on_disk(const char* path, const float* expect, int n, 
 }
 
 int main(void) {
-    const char* dir = "/tmp/lisa_storage_mutation";
+    const char* dir = "lisa_storage_mutation";
     int n0 = 8;
     int dim = 4;
 
@@ -197,7 +201,7 @@ int main(void) {
     storage_close(h2);
 
     /* --- v1 read-only path --- */
-    const char* v1dir = "/tmp/lisa_storage_v1";
+    const char* v1dir = "lisa_storage_v1";
     rm_rf(v1dir);
     lisa_mkdirs(v1dir);
     {

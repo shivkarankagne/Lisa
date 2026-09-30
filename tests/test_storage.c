@@ -24,12 +24,16 @@ static void check(const char* name, int cond) {
 
 static int rm_rf(const char* path) {
     char cmd[512];
+#ifdef _WIN32
+    snprintf(cmd, sizeof(cmd), "rmdir /s /q \"%s\" >nul 2>&1", path);
+#else
     snprintf(cmd, sizeof(cmd), "rm -rf '%s'", path);
+#endif
     return system(cmd);
 }
 
 int main(void) {
-    const char* dir = "/tmp/lisa_storage_test_collection";
+    const char* dir = "lisa_storage_test_collection";
     int n = 128;
     int dim = 32;
     int k = 5;
