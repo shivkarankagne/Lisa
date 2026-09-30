@@ -157,11 +157,19 @@ static void test_first_run_indexes_supported_files(void) {
     fake_t f = { 0, 0 };
     ingest_progress_t r;
     TEST_ASSERT_EQUAL_INT(INGEST_OK, run(s, &f, g_root, &r));
+#ifdef LISA_HAVE_PDFIUM
     TEST_ASSERT_EQUAL_INT64(5, r.files_seen);      /* a.txt, b.md, sub/c.txt, empty.txt, bad.pdf */
+    TEST_ASSERT_EQUAL_INT64(1, r.files_failed);    /* bad.pdf fails to parse */
+    TEST_ASSERT_EQUAL_INT64(1, r.files_skipped);   /* notes.zip; .hidden.txt not even seen */
+#else
+    /* No PDF support: bad.pdf has no extractor, so it is skipped before
+     * being counted as seen, and never produces an error record. */
+    TEST_ASSERT_EQUAL_INT64(4, r.files_seen);      /* a.txt, b.md, sub/c.txt, empty.txt */
+    TEST_ASSERT_EQUAL_INT64(0, r.files_failed);
+    TEST_ASSERT_EQUAL_INT64(2, r.files_skipped);   /* notes.zip, bad.pdf */
+#endif
     TEST_ASSERT_EQUAL_INT64(3, r.files_added);
     TEST_ASSERT_EQUAL_INT64(1, r.files_no_text);
-    TEST_ASSERT_EQUAL_INT64(1, r.files_failed);
-    TEST_ASSERT_EQUAL_INT64(1, r.files_skipped);    /* notes.zip; .hidden.txt not even seen */
     TEST_ASSERT_TRUE(r.chunks_added >= 3);
     TEST_ASSERT_EQUAL_INT64(r.chunks_added, lisa_store_count(s));
 
@@ -171,9 +179,13 @@ static void test_first_run_indexes_supported_files(void) {
     lisa_store_doc_free(&rec);
     TEST_ASSERT_EQUAL_STRING("no_text", status_of(s, "empty.txt", &rec));
     lisa_store_doc_free(&rec);
+#ifdef LISA_HAVE_PDFIUM
     TEST_ASSERT_EQUAL_STRING("error", status_of(s, "bad.pdf", &rec));
     TEST_ASSERT_TRUE(strlen(rec.message) > 0);
     lisa_store_doc_free(&rec);
+#else
+    TEST_ASSERT_NULL(status_of(s, "bad.pdf", &rec));  /* skipped, no record */
+#endif
     TEST_ASSERT_NULL(status_of(s, ".hidden.txt", &rec));
     lisa_store_close(s);
 }
