@@ -17,18 +17,20 @@ license. Paid enterprise features live in a separate private repo
 (`lisa-enterprise`) and must never be added here. Do not accept outside
 contributions until a Contributor License Agreement is in place.
 
-## Current phase: the working product (W0–W12)
+## Current phase: ship 1.0, then finish the ports
 
-**The only goal right now is a working LISA 1.0** as defined in
-`LISA_COMPLETION_PLAN.md` §0. Work only on packages W0–W12 (§6 of the plan).
+The working LISA 1.0 (plan §0) is built and validated on macOS, and the
+core is ported to Linux and Windows. The near-term goals are: **ship
+macOS 1.0** (code signing + the remaining W12 manual tests) and **finish
+the ports** (Windows PDF/GUI, packaging).
 
 - `LISA_COMPLETION_PLAN.md` is the source of truth: decisions (§2),
   portability rules (§2a), open-core rules (§2b), known defects (§4),
   reuse map (§5), work packages + acceptance criteria (§6), upgrade seams
   (§7).
-- Everything in plan §8 (L1–L11, E1–E4) is **out of scope** until W12
-  passes. Do not start it, stub it, or "prepare" for it beyond the seams
-  listed in §7.
+- Plan §8 (L1–L11, E1–E4) stays **out of scope** unless a recorded
+  decision pulls an item in (as decisions 16–20 did). Do not start,
+  stub, or "prepare" §8 work beyond the seams in §7 without a decision.
 - If a task seems to need something from §8, stop and ask.
 
 ### Work package order
@@ -41,27 +43,43 @@ W1 → W2 → W3 → W4, W5 (parallel) → W6, W7 → W8 → W9 → W10 → W5b,
 W5b (docx + OCR of scanned PDFs) was moved into 1.0 from §8 L3 by the
 user on 2026-09-19 (plan decision 16).
 
-W1–W11 are done (reports `LISA_REPORT_AND_UPDATE_002.md`–`_015.md`),
-except code signing in W11 (needs an Apple Developer ID). The macOS
-product works end to end and is validated on real documents; W5b, W10b,
-W12b (embedding batching) and W12c (e5-small-v2 default) are done. **W12
-validation is partly done** (eval set, crash and soak scripts, binary
-checks); the 8-hour soak, clean-machine and offline tests still need a
-person at the machine, and the W0 competitor baseline is blocked while
-the competitors are uninstalled. Decisions 16–20 are recorded in the
-plan §2; the current post-1.0 work is the **Linux headless port (W13,
-decision 20)** on the `linux-headless` branch. Check the plan's
-acceptance criteria for the package you are on; a package is not done
-until every criterion is met.
+### Where things stand (update this when a milestone lands)
+
+Reports `LISA_REPORT_AND_UPDATE_002.md`–`_016.md`. Decisions 1–20 are in
+plan §2; the plan's acceptance criteria define "done" for each package.
+
+- **macOS (arm64) — the reference platform.** LISA 1.0 works end to end
+  and is validated on real documents. Full suite (Release + sanitizer)
+  passes. Soak passed (8 h, 0 failures). Done except **code signing**
+  (needs an Apple Developer ID) and the **W12 clean-machine and offline
+  tests** (need a person at the machine). W0 competitor baseline is
+  blocked (competitors uninstalled).
+- **Linux (x86-64) — done, headless.** Search, PDF and cited answers, one
+  static binary; full suite green on CI (24/24) plus a models job proving
+  inference; shippable via `release.sh` / `release.yml`. No native GUI
+  (browser fallback), no GPU backend, no OCR (Tesseract deferred).
+- **Windows (x86-64) — core proven, being test-validated.** Win32
+  backend; builds with Clang; `lisa.exe` runs; models smoke passes (a
+  real cited answer). Test suite is being brought up on Windows CI. No
+  PDF yet (static PDFium not built for Windows), no GUI, tests that need
+  POSIX or `llama.h` are guarded off.
+
+The build packages are W0–W12 (1.0) and W13 (the ports, decision 20).
+Everything else in plan §8 stays out of scope unless a new decision pulls
+it in (as decisions 16–20 did). A package is not done until every
+acceptance criterion is met.
 
 ## Non-negotiable rules
 
 1. **Single executable.** Everything but the OS's own libraries is
-   statically linked. On macOS, `otool -L build/lisa` must list only
-   system libraries and frameworks (`/usr/lib/`, `/System/Library/`); on
-   Linux, `ldd build/lisa` must list only the base C/C++ runtime and libc
-   (libc, libm, libstdc++, libpthread/libdl and the loader). No vendored
-   or third-party shared library, ever.
+   statically linked. No vendored or third-party shared library, ever.
+   Verify per platform:
+   - macOS: `otool -L` lists only `/usr/lib/` and `/System/Library/`.
+   - Linux: `ldd` lists only the base C/C++ runtime and loader (libc,
+     libm, libstdc++, libgcc_s, libpthread/libdl, ld-linux, linux-vdso).
+   - Windows: `lisa.exe` depends only on Windows system DLLs
+     (kernel32, ntdll, bcrypt, shell32, ole32, ws2_32, and the C/C++
+     runtime); no `pdfium.dll` or other bundled DLL beside it.
 2. **No runtime network access.** LISA never contacts external hosts. The
    only socket is the local HTTP server on 127.0.0.1.
 3. **Reuse before building.** If a permissively licensed library in plan §5
@@ -75,10 +93,13 @@ until every criterion is met.
    under stated conditions.
 6. **Build the seams (plan §7).** Every package must leave the seam it owns
    in place, so later features plug in without rewrites.
-7. **Portable by default (plan §2a).** ARM64 macOS is the reference build;
-   x86-64 Linux is a supported port target (decision 20). Code must not
-   assume an OS or an architecture. OS-specific code lives only in
-   `src/platform/` and per-OS CMake branches — never in the core.
+7. **Portable by default (plan §2a).** Targets: **macOS arm64** (the
+   reference), **x86-64 Linux**, and **x86-64 Windows** (all decision 20).
+   Code must not assume an OS or an architecture. OS-specific code lives
+   only in `src/platform/` (`platform_posix.c` for macOS+Linux,
+   `platform_windows.c` for Windows, `platform_macos.m` for Apple-only
+   extras, `platform_ocr_none.c` where there is no system OCR) and per-OS
+   CMake branches — never in the core.
 8. **Say when something is incomplete.** Never hide missing functionality
    behind a plausible-looking abstraction or stub.
 
@@ -131,6 +152,89 @@ below, stop and ask; do not work around it.
 8. **Locked scope is locked.** Decisions 1–20 in plan §2 are settled.
    Do not reopen, "improve", or quietly redesign them. A new direction is
    a new decision the user makes, recorded in the plan first.
+
+## Per-platform: do and don't
+
+One codebase, three platforms. The core is identical everywhere; only
+`src/platform/` and per-OS CMake branches differ. You can build and run
+**macOS locally**; **Linux and Windows you cannot build locally** — they
+are verified only by CI.
+
+### All platforms
+
+- **Do** keep every OS call behind `src/platform/platform.h`. Add a new
+  OS by writing its backend file, not by putting `#ifdef __linux__` /
+  `#ifdef _WIN32` in the core.
+- **Do** verify the change on macOS locally before every commit
+  (Release + sanitizer), and on Linux/Windows via CI before it reaches
+  `main`.
+- **Don't** put OS-specific `#include`s (`<unistd.h>`, `<windows.h>`,
+  `<sys/mman.h>`, Apple frameworks) anywhere but `src/platform/`.
+- **Don't** claim a platform works because it compiled — a green build is
+  not a green test run, and a test that silently skips (e.g. no models)
+  proves nothing. Check that the thing actually ran.
+
+### macOS (arm64) — reference
+
+- **Do** treat its full green suite (Release + sanitizer) as the
+  definition of working; nothing merges that reduces it.
+- **Do** use `platform_posix.c` + `platform_macos.m` (Vision OCR, folder
+  picker, drag-drop, WKWebView) + Metal for llama.cpp.
+- **Don't** let a Linux or Windows change alter macOS behaviour or its
+  test results. If it would, the seam is wrong — stop and ask.
+
+### Linux (x86-64) — headless
+
+- **Do** use `platform_posix.c` (shared with macOS) + `platform_ocr_none.c`
+  (OCR returns "no text"). Link with **mold or lld** — GNU `ld` cannot
+  read the Chromium-built PDFium objects.
+- **Do** fetch the **static** PDFium built from source
+  (`build-pdfium-linux.yml` publishes it, `fetch_pdfium.sh` downloads it).
+- **Don't** link the PDFium `.so` from pdfium-binaries — it breaks the
+  single-executable rule. Static only.
+- **Don't** re-enable CREL in the PDFium build; `build_pdfium.sh` strips
+  `-Wa,--crel` from the fetched Chromium config on purpose (no linker
+  here handles CREL). This is the one allowed edit to fetched third-party
+  build files, and it is documented in the script.
+
+### Windows (x86-64) — core proven
+
+- **Do** use `platform_windows.c` (Win32; UTF-8↔UTF-16 at the boundary)
+  + `platform_ocr_none.c`. Build with **Clang (MSVC ABI)**, not MSVC:
+  the kernel registry uses C11 atomics that MSVC supports only
+  experimentally.
+- **Do** guard GCC/Clang-only CMake flags with `if(NOT MSVC)` and link
+  the Win32 libraries (bcrypt, shell32, ole32, ws2_32); `libm` is part of
+  the CRT, not a separate library.
+- **Don't** build PDF or the native GUI on Windows yet (not done). Tests
+  that use POSIX (`fork`, `unistd.h`) or include `llama.h` directly are
+  guarded off Windows; keep them that way until ported.
+
+## Branch and CI discipline (how ports don't break `main`)
+
+- **Do** develop any Linux/Windows/port work on a **branch**, and merge
+  only when that platform's CI is green. After a merge you are left
+  standing on `main` — **run `git branch --show-current` and branch again
+  before the next port commit.** (Pushing unverified port code straight
+  to `main` has already turned its CI red once; don't repeat it.)
+- **Do** let CI be the truth for Linux/Windows, since you cannot build
+  them locally: read the actual job log, don't assume.
+- **Don't** commit to `main` a change to shared files (CMakeLists,
+  `platform.h`, a test) that you have only verified on macOS, if it also
+  affects Linux or Windows — that belongs on a branch until their CI
+  confirms it.
+
+## Tests must be portable too
+
+- **Do** write tests against `src/platform/platform.h` (`lisa_mkdirs`,
+  `lisa_path_exists`, `lisa_path_absolute`, `lisa_process_id`,
+  `lisa_sleep_ms`, …) and include `tests/posix_compat.h` instead of
+  `<unistd.h>` for low-level file calls.
+- **Don't** add raw POSIX to a test (`fork`, `getpid`, `usleep`,
+  `realpath`, `mkdir(path, mode)`, `access`, `utimes`, `<sys/*.h>`) — it
+  breaks the Windows build. A genuinely POSIX-only test (fork-based crash
+  test, symlink/flock specifics) is guarded `if(NOT WIN32)` in CMake, and
+  the behaviour it covers is noted as macOS/Linux-only.
 
 ## What NOT to do
 
@@ -190,7 +294,11 @@ around it.
 - **Do not add a dependency** that is not in plan §5 without an intake
   record and approval. Never add a runtime dependency.
 - **Do not modify vendored code in `third_party/`** unless unavoidable;
-  record every change in its `INTAKE.md`.
+  record every change in its `INTAKE.md`. (One standing exception: the
+  PDFium build scripts strip Chromium's `-Wa,--crel` flag from the
+  *fetched* build config so the objects link on Linux — this is a build
+  patch applied at build time, not an edit to committed sources, and it is
+  documented in `scripts/build_pdfium.sh`. Keep it.)
 - **Do not add platform-specific code** (`#ifdef __APPLE__`, system
   headers, Apple frameworks) outside `src/platform/` or kernel backends.
 - **Do not change benchmark conditions or publish numbers** without a new
