@@ -212,33 +212,18 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
           -DLISA_REQUIRE_PDF=OFF -DLISA_MODELS_DIR=nonexistent
-          "-DCMAKE_C_FLAGS=-gcodeview" "-DCMAKE_EXE_LINKER_FLAGS=-Wl,/debug"
 
       - name: Build
         run: cmake --build build -j
 
-      # TEMP (windows-fixes branch): backtrace the storage segfault with cdb
-      # (symbols via -gcodeview + a PDB).
-      - name: Diagnose test_storage segfault
-        shell: pwsh
-        run: |
-          $cdb = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\cdb.exe" -ErrorAction SilentlyContinue
-          if (-not $cdb) { $cdb = Get-Command cdb -ErrorAction SilentlyContinue }
-          if (-not $cdb) { Write-Host "cdb not found"; exit 0 }
-          Write-Host "using $($cdb.FullName)"
-          & $cdb.FullName -g -G -c "kn 40; q" .\build\test_storage.exe 2>&1 | Select-Object -Last 70
-
-      # The Win32 backend is validated by the retrieval, kernel, context,
-      # sqlite and search tests. Excluded for now (tracked, being fixed on
-      # a branch): test_storage/test_storage_mutation segfault on Windows,
-      # test_store has compaction/migrate failures, test_http returns 400
-      # for static files, and test_ingest expects a PDF that this PDF-less
-      # build cannot read. GUI/CLI tests need a browser/bash.
+      # Excluded (tracked, still being fixed): test_store has
+      # compaction/migrate failures on Windows and test_http returns 400
+      # for static files. GUI/CLI tests need a browser/bash.
       - name: Test (Windows-clean subset)
         shell: bash
         run: >
           ctest --test-dir build --output-on-failure --timeout 900
-          -E "test_gui|test_cli|test_storage|test_storage_mutation|test_store|test_http|test_ingest"
+          -E "test_gui|test_cli|test_http|test_store$|test_store_crash"
 
       - name: Startup check
         run: build/lisa.exe --version
