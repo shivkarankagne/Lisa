@@ -387,7 +387,10 @@ int lisa_map_file(const char* path, int writable, lisa_map_t** out) {
     if (w == NULL) return LISA_PLAT_ENOMEM;
 
     DWORD access = GENERIC_READ | (writable ? GENERIC_WRITE : 0);
-    DWORD share = FILE_SHARE_READ | FILE_SHARE_WRITE;
+    /* FILE_SHARE_DELETE lets compaction rename/delete a vector file while a
+     * reader still has it mapped, matching POSIX unlink-open semantics; the
+     * reader keeps working and moves to the new file on refresh. */
+    DWORD share = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
     HANDLE file = CreateFileW(w, access, share, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     free(w);
     if (file == INVALID_HANDLE_VALUE) return from_win32(GetLastError());
