@@ -77,7 +77,11 @@ void log_write(log_level_t level, const char* fmt, ...) {
     char stamp[32];
     time_t now = time(NULL);
     struct tm tm;
+#ifdef _WIN32
+    gmtime_s(&tm, &now);     /* Windows: arguments reversed vs POSIX */
+#else
     gmtime_r(&now, &tm);
+#endif
     strftime(stamp, sizeof(stamp), "%Y-%m-%dT%H:%M:%SZ", &tm);
 
     char line[1024];

@@ -187,3 +187,91 @@ jobs:
 
       - name: Test (with models; only the browser GUI test is skipped)
         run: ctest --test-dir build --output-on-failure --timeout 3600 -E "test_gui"
+
+  # First step of the Windows port (plan W13): prove the Win32 platform
+  # backend and the core compile and the binary runs. Headless, no PDF, no
+  # models, tests off for now (many use POSIX-only calls). Built with Clang
+  # (MSVC ABI) because the kernel registry uses C11 atomics, which MSVC
+  # supports only experimentally.
+  windows-x64:
+    name: Windows x64 (headless, no PDF/models)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: |
+          clang --version
+          cmake --version
+          ninja --version
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+          -DLISA_BUILD_TESTS=OFF -DLISA_REQUIRE_PDF=OFF
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Startup check
+        run: build/lisa.exe --version
+
+  # Proves the full answer pipeline (embed, retrieve, generate) runs on
+  # Windows via the CLI. The test suite is not built here yet (many tests
+  # use POSIX-only calls), so this is a direct end-to-end smoke instead.
+  windows-x64-models:
+    name: Windows x64 (models smoke)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: clang --version; cmake --version; ninja --version
+
+      - name: Cache models
+        uses: actions/cache@v4
+        with:
+          path: models
+          key: models-e5-small-v2-q8-qwen3-4b-q4km-bc640142
+
+      - name: Download models (verified)
+        run: |
+          mkdir -p models
+          get() {  # url file sha256
+            if [ ! -f "models/$2" ]; then
+              curl -sfL --retry 5 -o "models/$2.part" "$1"
+              echo "$3  models/$2.part" | sha256sum -c -
+              mv "models/$2.part" "models/$2"
+            fi
+          }
+          get https://huggingface.co/ggml-org/e5-small-v2-Q8_0-GGUF/resolve/main/e5-small-v2-q8_0.gguf \
+              e5-small-v2-q8_0.gguf afdfb5c342d2efc2a051c426dd1d00913495d5f2bbceaea100d2f3892aa31cbc
+          get https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf \
+              Qwen3-4B-Q4_K_M.gguf 7485fe6f11af29433bc51cab58009521f205840f5b4ae3a32fa7f92e8534fdf5
+
+      - name: Configure
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
+          -DLISA_BUILD_TESTS=OFF -DLISA_REQUIRE_PDF=OFF
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: End-to-end smoke (ingest a fact, ask, check the answer)
+        run: |
+          printf 'The Snowdrop reader weighs 320 grams.\n' > fact.md
+          ./build/lisa.exe model --set "models/e5-small-v2-q8_0.gguf"
+          ./build/lisa.exe model --set "models/Qwen3-4B-Q4_K_M.gguf"
+          ./build/lisa.exe ingest --collection t "fact.md"
+          out=$(./build/lisa.exe ask --collection t "How much does the Snowdrop reader weigh?")
+          echo "$out"
+          echo "$out" | grep -q 320 || { echo "FAIL: expected 320 in the answer"; exit 1; }
