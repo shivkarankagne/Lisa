@@ -34,9 +34,20 @@ case "$(uname -s)" in
 esac
 
 # On Windows, use the locally installed Visual Studio toolchain instead of
-# Google's internal package (which is not accessible to us).
+# Google's internal package (which is not accessible to us). Chromium's
+# setup_toolchain.py then needs to be told where VS is.
 if [ "$OS" = "win" ]; then
     export DEPOT_TOOLS_WIN_TOOLCHAIN=0
+    VSWHERE="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+    VS_PATH="$("$VSWHERE" -latest -products '*' -property installationPath)"
+    if [ -z "$VS_PATH" ]; then
+        echo "error: Visual Studio not found via vswhere" >&2
+        exit 1
+    fi
+    export GYP_MSVS_OVERRIDE_PATH="$VS_PATH"
+    export GYP_MSVS_VERSION=2022
+    export vs2022_install="$VS_PATH"
+    echo "using Visual Studio at: $VS_PATH"
     LIB_NAME="pdfium.lib"
 else
     LIB_NAME="libpdfium.a"
