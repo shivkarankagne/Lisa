@@ -104,16 +104,15 @@ if [ "$OS" = "win" ]; then
         exit 1
     fi
     echo "pinning Windows SDK to installed version: $INSTALLED_SDK"
-    export WINDOWSSDKVERSION="$INSTALLED_SDK"
-    export WindowsSdkVerBinPath="/c/Program Files (x86)/Windows Kits/10/bin/$INSTALLED_SDK/"
-    # Rewrite every pinned SDK version that is not the installed one. Chromium
-    # hardcodes its desired version (a preview like 10.0.28000.0) in several
-    # build files; point them all at the SDK the runner actually has.
-    for V in $(grep -rhoE '10\.0\.[0-9]{5}\.0' build/ 2>/dev/null | sort -u); do
-        [ "$V" = "$INSTALLED_SDK" ] && continue
-        echo "rewriting Chromium SDK $V -> $INSTALLED_SDK in:"
-        grep -rlE "$V" build/ 2>/dev/null | tee /dev/stderr \
-            | xargs -r sed -i "s/${V//./\\.}/$INSTALLED_SDK/g"
+    # Chromium hardcodes its desired SDK as `SDK_VERSION = '10.0.NNNNN.0'`
+    # (a preview the runner lacks) and appends it to vcvarsall, so env vars
+    # cannot override it. Rewrite that constant to the installed SDK in the
+    # two scripts that define it.
+    for f in build/toolchain/win/setup_toolchain.py build/vs_toolchain.py; do
+        if [ -f "$f" ] && grep -q "^SDK_VERSION = " "$f"; then
+            sed -i "s/^SDK_VERSION = .*/SDK_VERSION = '$INSTALLED_SDK'/" "$f"
+            echo "pinned SDK_VERSION in $f: $(grep '^SDK_VERSION = ' "$f")"
+        fi
     done
 fi
 
