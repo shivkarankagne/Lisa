@@ -307,8 +307,12 @@ if(NOT APPLE AND LISA_ENABLE_TESSERACT)
     set(DISABLE_CURL ON CACHE BOOL "" FORCE)
     set(DISABLE_ARCHIVE ON CACHE BOOL "" FORCE)
     set(DISABLE_TIFF ON CACHE BOOL "" FORCE)
-    set(GRAPHICS_DISABLED ON CACHE BOOL "" FORCE)
-    set(DISABLED_LEGACY_ENGINE ON CACHE BOOL "" FORCE)
+    # Build the full engine. DISABLED_LEGACY_ENGINE / GRAPHICS_DISABLED leave
+    # undefined references (the disable macros don't fully propagate in this
+    # tree), so the final link fails; building everything defines all symbols.
+    # We still select LSTM at runtime (OEM_LSTM_ONLY) and never open a viewer.
+    set(GRAPHICS_DISABLED OFF CACHE BOOL "" FORCE)
+    set(DISABLED_LEGACY_ENGINE OFF CACHE BOOL "" FORCE)
     set(USE_SYSTEM_ICU OFF CACHE BOOL "" FORCE)
     set(INSTALL_CONFIGS OFF CACHE BOOL "" FORCE)
     add_subdirectory(third_party/tesseract EXCLUDE_FROM_ALL)
