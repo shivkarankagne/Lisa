@@ -54,9 +54,13 @@ export DEPOT_TOOLS_METRICS=0
 # One-time setup of the tools' own Python/CIPD environment (gn, ninja).
 # After that, keep depot_tools pinned at the version we cloned.
 # Called by absolute path: the script locates its own directory from $0.
-# On Windows depot_tools bootstraps itself on the first gclient call (there
-# is no ensure_bootstrap shell script), so this POSIX step is skipped.
-if [ "$OS" != "win" ]; then
+if [ "$OS" = "win" ]; then
+    # Windows: win_tools.bat installs depot_tools' bundled git, python,
+    # gn and ninja. Without it, gclient's git subprocess is not found
+    # (WinError 2). The .bat wrappers below use these bundled tools.
+    cmd //c "$(cygpath -w "$WORK/depot_tools/bootstrap/win_tools.bat")"
+    GCLIENT="gclient.bat"; GN="gn.bat"; NINJA="ninja.bat"
+else
     if [ ! -f "$WORK/depot_tools/python3_bin_reldir.txt" ]; then
         "$WORK/depot_tools/ensure_bootstrap"
     fi
@@ -64,14 +68,15 @@ if [ "$OS" != "win" ]; then
         echo "error: depot_tools bootstrap failed (python3_bin_reldir.txt missing)" >&2
         exit 1
     fi
+    GCLIENT="gclient"; GN="gn"; NINJA="ninja"
 fi
 export DEPOT_TOOLS_UPDATE=0
 
 if [ ! -f .gclient ]; then
-    gclient config --unmanaged https://pdfium.googlesource.com/pdfium.git \
+    "$GCLIENT" config --unmanaged https://pdfium.googlesource.com/pdfium.git \
         --custom-var checkout_configuration=minimal
 fi
-gclient sync --no-history --shallow --revision "pdfium@$PDFIUM_COMMIT"
+"$GCLIENT" sync --no-history --shallow --revision "pdfium@$PDFIUM_COMMIT"
 
 cd pdfium
 # Chromium enables CREL (compact) relocations on Linux x64 by passing
@@ -85,7 +90,7 @@ find build -name '*.gn' -o -name '*.gni' 2>/dev/null \
     | xargs grep -l -- '--allow-experimental-crel' 2>/dev/null \
     | xargs -r sed -i '/--allow-experimental-crel/d'
 
-gn gen out/lisa --args="
+"$GN" gen out/lisa --args="
     is_debug=false
     symbol_level=0
     target_os=\"$OS\"
@@ -123,7 +128,7 @@ gn gen out/lisa --args="
 # archive. Removing the flag while keeping lld (which Chromium's own build
 # needs) leaves ordinary relocations that any linker reads. ARM is
 # excluded upstream, which is why macOS was unaffected.
-ninja -C out/lisa pdfium
+"$NINJA" -C out/lisa pdfium
 
 rm -rf "$OUT"
 mkdir -p "$OUT/lib" "$OUT/include"
