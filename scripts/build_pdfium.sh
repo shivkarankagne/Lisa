@@ -27,10 +27,20 @@ case "$(uname -m)" in
     *) echo "unsupported CPU: $(uname -m)" >&2; exit 1 ;;
 esac
 case "$(uname -s)" in
-    Darwin) OS=mac ;;
-    Linux)  OS=linux ;;
+    Darwin)              OS=mac ;;
+    Linux)               OS=linux ;;
+    MINGW*|MSYS*|CYGWIN*) OS=win ;;   # Git Bash on the Windows runner
     *) echo "unsupported OS: $(uname -s)" >&2; exit 1 ;;
 esac
+
+# On Windows, use the locally installed Visual Studio toolchain instead of
+# Google's internal package (which is not accessible to us).
+if [ "$OS" = "win" ]; then
+    export DEPOT_TOOLS_WIN_TOOLCHAIN=0
+    LIB_NAME="pdfium.lib"
+else
+    LIB_NAME="libpdfium.a"
+fi
 
 mkdir -p "$WORK"
 cd "$WORK"
@@ -44,12 +54,16 @@ export DEPOT_TOOLS_METRICS=0
 # One-time setup of the tools' own Python/CIPD environment (gn, ninja).
 # After that, keep depot_tools pinned at the version we cloned.
 # Called by absolute path: the script locates its own directory from $0.
-if [ ! -f "$WORK/depot_tools/python3_bin_reldir.txt" ]; then
-    "$WORK/depot_tools/ensure_bootstrap"
-fi
-if [ ! -f "$WORK/depot_tools/python3_bin_reldir.txt" ]; then
-    echo "error: depot_tools bootstrap failed (python3_bin_reldir.txt missing)" >&2
-    exit 1
+# On Windows depot_tools bootstraps itself on the first gclient call (there
+# is no ensure_bootstrap shell script), so this POSIX step is skipped.
+if [ "$OS" != "win" ]; then
+    if [ ! -f "$WORK/depot_tools/python3_bin_reldir.txt" ]; then
+        "$WORK/depot_tools/ensure_bootstrap"
+    fi
+    if [ ! -f "$WORK/depot_tools/python3_bin_reldir.txt" ]; then
+        echo "error: depot_tools bootstrap failed (python3_bin_reldir.txt missing)" >&2
+        exit 1
+    fi
 fi
 export DEPOT_TOOLS_UPDATE=0
 
@@ -113,7 +127,7 @@ ninja -C out/lisa pdfium
 
 rm -rf "$OUT"
 mkdir -p "$OUT/lib" "$OUT/include"
-cp out/lisa/obj/libpdfium.a "$OUT/lib/"
+cp "out/lisa/obj/$LIB_NAME" "$OUT/lib/"
 cp -R public/. "$OUT/include/"
 cp LICENSE "$OUT/LICENSE"
 cat > "$OUT/VERSION" <<VER
@@ -122,4 +136,4 @@ commit=$PDFIUM_COMMIT
 os=$OS
 cpu=$CPU
 VER
-echo "PDFium built: $OUT/lib/libpdfium.a ($(du -h "$OUT/lib/libpdfium.a" | cut -f1))"
+echo "PDFium built: $OUT/lib/$LIB_NAME ($(du -h "$OUT/lib/$LIB_NAME" | cut -f1))"
