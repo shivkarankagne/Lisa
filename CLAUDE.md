@@ -224,6 +224,30 @@ are verified only by CI.
   affects Linux or Windows — that belongs on a branch until their CI
   confirms it.
 
+### GitHub workflow (branch protection is ACTIVE on `main`)
+
+`main` is protected by an active repository ruleset ("Protect main"):
+deletions restricted, force-pushes blocked, linear history, pull request
+required (0 approvals), and these status checks must pass before merge —
+`macOS ARM64 (release)`, `Linux x64 (headless, no models)`,
+`Windows x64 (tests, no PDF/models)`. **You cannot push to `main`
+directly — all changes go through a PR.**
+
+- **Do** start every piece of work on a fresh branch off up-to-date
+  `main`:
+  `git switch main && git pull && git switch -c <type>/<short-desc>`
+  (e.g. `fix/windows-compaction`, `feat/linux-gtk`).
+- **Do** commit per logical change and push the branch (never `main`):
+  `git push -u origin <branch>`. Open a PR with
+  `gh pr create --fill --base main`.
+- **Do** let the three required checks go green on the PR, then merge:
+  `gh pr merge --squash --delete-branch` (squash keeps linear history).
+  After merge you are on `main` again — branch again before the next
+  change.
+- **Don't** force-push `main`, delete `main`, or try to bypass the
+  ruleset. **Don't** claim protection is active without reading it back
+  from GitHub (`gh api repos/<owner>/<repo>/rulesets/<id>`).
+
 ## Tests must be portable too
 
 - **Do** write tests against `src/platform/platform.h` (`lisa_mkdirs`,
