@@ -385,6 +385,9 @@ if(LISA_BUILD_TESTS)
 
     add_executable(test_ingest tests/test_ingest.c)
     target_link_libraries(test_ingest PRIVATE lisa_core lisa_unity)
+    if(LISA_HAVE_PDFIUM)
+        target_compile_definitions(test_ingest PRIVATE LISA_HAVE_PDFIUM)
+    endif()
     add_test(NAME test_ingest
              COMMAND test_ingest ${CMAKE_BINARY_DIR}/scratch ${CMAKE_SOURCE_DIR}/tests/fixtures ${LISA_MODELS_DIR})
     set_tests_properties(test_ingest PROPERTIES TIMEOUT 1800)

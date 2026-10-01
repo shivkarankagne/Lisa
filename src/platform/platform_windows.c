@@ -82,6 +82,17 @@ char lisa_path_sep(void) {
     return '\\';
 }
 
+int lisa_path_is_absolute(const char* path) {
+    if (path == NULL) return 0;
+    /* UNC path: "\\server\share" or "//server/share". */
+    if ((path[0] == '\\' || path[0] == '/') &&
+        (path[1] == '\\' || path[1] == '/')) return 1;
+    /* Drive path: "C:\" or "C:/" (a drive-relative "C:foo" is not absolute). */
+    if (((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')) &&
+        path[1] == ':' && (path[2] == '\\' || path[2] == '/')) return 1;
+    return 0;
+}
+
 char* lisa_path_join(const char* dir, const char* name) {
     if (dir == NULL || name == NULL) return NULL;
     size_t dl = strlen(dir), nl = strlen(name);
@@ -387,7 +398,10 @@ int lisa_map_file(const char* path, int writable, lisa_map_t** out) {
     if (w == NULL) return LISA_PLAT_ENOMEM;
 
     DWORD access = GENERIC_READ | (writable ? GENERIC_WRITE : 0);
-    DWORD share = FILE_SHARE_READ | FILE_SHARE_WRITE;
+    /* FILE_SHARE_DELETE lets compaction rename/delete a vector file while a
+     * reader still has it mapped, matching POSIX unlink-open semantics; the
+     * reader keeps working and moves to the new file on refresh. */
+    DWORD share = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
     HANDLE file = CreateFileW(w, access, share, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
     free(w);
     if (file == INVALID_HANDLE_VALUE) return from_win32(GetLastError());

@@ -336,7 +336,7 @@ static int h_ingest(lisa_server_t* s, struct mg_connection* conn, const char* na
     const char* bad = NULL;
     yyjson_arr_foreach(paths, idx, max, v) {
         const char* p = yyjson_get_str(v);
-        if (p == NULL || p[0] != '/') {
+        if (p == NULL || !lisa_path_is_absolute(p)) {
             bad = "every path must be an absolute path";
             break;
         }
@@ -715,7 +715,7 @@ static int h_settings_post(lisa_server_t* s, struct mg_connection* conn) {
         if (v == NULL) continue;
         const char* p = yyjson_get_str(v);
         lisa_known_model_t km;
-        if (p == NULL || p[0] != '/') bad = "model paths must be absolute";
+        if (p == NULL || !lisa_path_is_absolute(p)) bad = "model paths must be absolute";
         else if (known_by_name_and_size(p, &km) != LISA_OK)
             bad = "not a known model file (unknown files can be set with `lisa model --set`)";
         else if ((km.is_embedding != 0) != (k == APP_MODEL_EMBEDDING))
@@ -735,7 +735,7 @@ static int h_settings_post(lisa_server_t* s, struct mg_connection* conn) {
         yyjson_val* v;
         yyjson_arr_foreach(folders, idx, max, v) {
             const char* f = yyjson_get_str(v);
-            if (f == NULL || f[0] != '/') bad = "each watched folder must be an absolute path";
+            if (f == NULL || !lisa_path_is_absolute(f)) bad = "each watched folder must be an absolute path";
             else if (n < APP_MAX_WATCHED) paths[n++] = f;
             if (bad) break;
         }

@@ -553,7 +553,10 @@ static void downgrade_to_v1(const char* dir) {
 static int count_backup(void* user, const char* path, const lisa_file_info_t* info) {
     (void)info;
     const char* base = strrchr(path, '/');
-    if (base && strncmp(base + 1, "meta.v", 6) == 0 && strstr(base, "-backup-")) (*(int*)user)++;
+    const char* bslash = strrchr(path, '\\');   /* Windows separator */
+    if (bslash && (!base || bslash > base)) base = bslash;
+    base = base ? base + 1 : path;
+    if (strncmp(base, "meta.v", 6) == 0 && strstr(base, "-backup-")) (*(int*)user)++;
     return 0;
 }
 

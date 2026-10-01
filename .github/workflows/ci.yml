@@ -216,17 +216,12 @@ jobs:
       - name: Build
         run: cmake --build build -j
 
-      # The Win32 backend is validated by the retrieval, kernel, context,
-      # sqlite and search tests. Excluded for now (tracked, being fixed on
-      # a branch): test_storage/test_storage_mutation segfault on Windows,
-      # test_store has compaction/migrate failures, test_http returns 400
-      # for static files, and test_ingest expects a PDF that this PDF-less
-      # build cannot read. GUI/CLI tests need a browser/bash.
+      # GUI/CLI tests need a browser/bash.
       - name: Test (Windows-clean subset)
         shell: bash
         run: >
           ctest --test-dir build --output-on-failure --timeout 900
-          -E "test_gui|test_cli|test_storage|test_storage_mutation|test_store|test_http|test_ingest"
+          -E "test_gui|test_cli|test_store_crash"
 
       - name: Startup check
         run: build/lisa.exe --version
