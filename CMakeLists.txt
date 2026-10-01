@@ -291,6 +291,16 @@ endif()
 # executable stays self-contained.
 option(LISA_ENABLE_TESSERACT "Build in-tree Tesseract OCR (non-Apple)" ON)
 if(NOT APPLE AND LISA_ENABLE_TESSERACT)
+    # Windows/clang-cl: Tesseract headers pull in <intrin.h>, which drags in
+    # clang 20's <mmintrin.h>; that header miscompiles unless MMX/SSE target
+    # features are enabled. Build the vendored libs with -mssse3 so the MMX
+    # intrinsics lower correctly. Scoped to this block, then restored.
+    set(_lisa_saved_c_flags "${CMAKE_C_FLAGS}")
+    set(_lisa_saved_cxx_flags "${CMAKE_CXX_FLAGS}")
+    if(WIN32)
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -mssse3")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mssse3")
+    endif()
     set(BUILD_PROG OFF CACHE BOOL "" FORCE)
     set(SW_BUILD OFF CACHE BOOL "" FORCE)
     foreach(x ZLIB PNG GIF JPEG TIFF WEBP OPENJPEG)
@@ -316,6 +326,9 @@ if(NOT APPLE AND LISA_ENABLE_TESSERACT)
     set(USE_SYSTEM_ICU OFF CACHE BOOL "" FORCE)
     set(INSTALL_CONFIGS OFF CACHE BOOL "" FORCE)
     add_subdirectory(third_party/tesseract EXCLUDE_FROM_ALL)
+
+    set(CMAKE_C_FLAGS "${_lisa_saved_c_flags}")
+    set(CMAKE_CXX_FLAGS "${_lisa_saved_cxx_flags}")
 
     add_custom_command(
         OUTPUT ${CMAKE_BINARY_DIR}/tessdata_eng.c
