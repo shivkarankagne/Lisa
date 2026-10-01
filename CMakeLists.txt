@@ -284,11 +284,60 @@ if(WIN32)
 else()
     target_link_libraries(lisa_core PUBLIC lisa_sqlite m PRIVATE llama vendor::hash lisa_md4c lisa_utf8proc lisa_miniz)
 endif()
+# Tesseract OCR (third_party/{leptonica,tesseract}): the OCR backend on Linux
+# and Windows; macOS uses Apple Vision instead. Both are built in-tree as
+# static libraries — Leptonica with every image codec off (we feed raw BGRx
+# pixels) and Tesseract LSTM-only — and the English model is embedded, so the
+# executable stays self-contained.
+option(LISA_ENABLE_TESSERACT "Build in-tree Tesseract OCR (non-Apple)" ON)
+if(NOT APPLE AND LISA_ENABLE_TESSERACT)
+    set(BUILD_PROG OFF CACHE BOOL "" FORCE)
+    set(SW_BUILD OFF CACHE BOOL "" FORCE)
+    foreach(x ZLIB PNG GIF JPEG TIFF WEBP OPENJPEG)
+        set(ENABLE_${x} OFF CACHE BOOL "" FORCE)
+    endforeach()
+    add_subdirectory(third_party/leptonica EXCLUDE_FROM_ALL)
+
+    set(LISA_LEPTONICA_TARGET leptonica)
+    set(LISA_LEPTONICA_INCLUDE_DIRS
+        "${CMAKE_SOURCE_DIR}/third_party/leptonica/src;${CMAKE_BINARY_DIR}/third_party/leptonica/src")
+    set(LISA_LEPTONICA_VERSION 1.85.0)
+    set(BUILD_TRAINING_TOOLS OFF CACHE BOOL "" FORCE)
+    set(BUILD_TESTS OFF CACHE BOOL "" FORCE)
+    set(DISABLE_CURL ON CACHE BOOL "" FORCE)
+    set(DISABLE_ARCHIVE ON CACHE BOOL "" FORCE)
+    set(DISABLE_TIFF ON CACHE BOOL "" FORCE)
+    set(GRAPHICS_DISABLED ON CACHE BOOL "" FORCE)
+    set(DISABLED_LEGACY_ENGINE ON CACHE BOOL "" FORCE)
+    set(USE_SYSTEM_ICU OFF CACHE BOOL "" FORCE)
+    set(INSTALL_CONFIGS OFF CACHE BOOL "" FORCE)
+    add_subdirectory(third_party/tesseract EXCLUDE_FROM_ALL)
+
+    add_custom_command(
+        OUTPUT ${CMAKE_BINARY_DIR}/tessdata_eng.c
+        COMMAND ${CMAKE_COMMAND} -DOUT=${CMAKE_BINARY_DIR}/tessdata_eng.c
+                -DSRC=${CMAKE_SOURCE_DIR}/third_party/tessdata/eng.traineddata
+                -P ${CMAKE_SOURCE_DIR}/cmake/embed_tessdata.cmake
+        DEPENDS ${CMAKE_SOURCE_DIR}/third_party/tessdata/eng.traineddata
+                ${CMAKE_SOURCE_DIR}/cmake/embed_tessdata.cmake
+        VERBATIM)
+    set(LISA_HAVE_TESSERACT ON)
+endif()
+
 if(APPLE)
     # macOS: the folder picker, drag-drop, and Apple Vision OCR.
     target_sources(lisa_core PRIVATE src/platform/platform_macos.m)
     set_source_files_properties(src/platform/platform_macos.m PROPERTIES COMPILE_OPTIONS "-fno-objc-arc")
     target_link_libraries(lisa_core PUBLIC "-framework Cocoa" "-framework Vision")
+elseif(LISA_HAVE_TESSERACT)
+    # Linux/Windows: Tesseract over Leptonica, with the model embedded.
+    target_sources(lisa_core PRIVATE
+        src/platform/platform_ocr_tesseract.c ${CMAKE_BINARY_DIR}/tessdata_eng.c)
+    target_include_directories(lisa_core PRIVATE
+        third_party/leptonica/src ${CMAKE_BINARY_DIR}/third_party/leptonica/src
+        third_party/tesseract/include)
+    target_link_libraries(lisa_core PRIVATE libtesseract leptonica)
+    target_compile_definitions(lisa_core PRIVATE LISA_HAVE_TESSERACT)
 else()
     # No system recogniser: scanned pages are reported as having no text.
     target_sources(lisa_core PRIVATE src/platform/platform_ocr_none.c)
