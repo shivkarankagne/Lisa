@@ -1,0 +1,79 @@
+# SPDX-License-Identifier: BUSL-1.1
+#
+# Build a static PDFium (pdfium.lib) for x86-64 Windows from the pinned
+# source and publish it as a release asset, so scripts/fetch_pdfium.sh can
+# download it the way the macOS and Linux assets are downloaded.
+# pdfium-binaries ships only a DLL for Windows, which would break the
+# single-executable rule, so LISA builds its own static library.
+#
+# Run manually (Actions -> "build pdfium windows" -> Run workflow). One-time
+# per PDFium version; the result is reused by every build afterwards.
+
+name: build pdfium windows
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      # The runner ships only Windows SDK 10.0.26100.0 (24H2), whose headers
+      # miscompile under clang-cl (FILE_INFO_BY_HANDLE_CLASS). Install the
+      # 22621 SDK so the build has a clang-cl-safe toolchain to pin to.
+      - name: Install Windows SDK 10.0.22621
+        uses: GuillaumeFalourd/setup-windows10-sdk-action@v2
+        with:
+          sdk-version: 22621
+
+      - name: Build static PDFium
+        run: scripts/build_pdfium.sh
+
+      - name: Package
+        id: pkg
+        run: |
+          VER=".deps/pdfium/VERSION"
+          BRANCH=$(sed -n 's/^branch=//p' "$VER")   # chromium/8057
+          NUM=${BRANCH#chromium/}                    # 8057
+          NAME="pdfium-chromium-${NUM}-windows-x64"
+          mkdir -p "dist/$NAME"
+          cp -R .deps/pdfium/. "dist/$NAME/"
+          ( cd dist && tar czf "$NAME.tar.gz" "$NAME" )
+          SHA=$(cd dist && sha256sum "$NAME.tar.gz" | cut -d' ' -f1)
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "tag=deps-$NAME" >> "$GITHUB_OUTPUT"
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+          echo "SHA-256: $SHA"
+          ls -l ".deps/pdfium/lib/"
+
+      - name: Publish the asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.pkg.outputs.tag }}"
+          NAME="${{ steps.pkg.outputs.name }}"
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" --title "$TAG" \
+              --notes "Static PDFium for x86-64 Windows, built by build-pdfium-windows.yml. SHA-256: ${{ steps.pkg.outputs.sha }}"
+          gh release upload "$TAG" "dist/$NAME.tar.gz" --clobber
+
+      - name: Record the checksum in the summary
+        run: |
+          {
+            echo "## PDFium Windows asset published"
+            echo ""
+            echo "- Tag: \`${{ steps.pkg.outputs.tag }}\`"
+            echo "- Asset: \`${{ steps.pkg.outputs.name }}.tar.gz\`"
+            echo "- SHA-256: \`${{ steps.pkg.outputs.sha }}\`"
+            echo ""
+            echo "Put this SHA-256 into scripts/fetch_pdfium.sh for the windows-x64 case."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -27,10 +27,31 @@ case "$(uname -m)" in
     *) echo "unsupported CPU: $(uname -m)" >&2; exit 1 ;;
 esac
 case "$(uname -s)" in
-    Darwin) OS=mac ;;
-    Linux)  OS=linux ;;
+    Darwin)              OS=mac ;;
+    Linux)               OS=linux ;;
+    MINGW*|MSYS*|CYGWIN*) OS=win ;;   # Git Bash on the Windows runner
     *) echo "unsupported OS: $(uname -s)" >&2; exit 1 ;;
 esac
+
+# On Windows, use the locally installed Visual Studio toolchain instead of
+# Google's internal package (which is not accessible to us). Chromium's
+# setup_toolchain.py then needs to be told where VS is.
+if [ "$OS" = "win" ]; then
+    export DEPOT_TOOLS_WIN_TOOLCHAIN=0
+    VSWHERE="/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe"
+    VS_PATH="$("$VSWHERE" -latest -products '*' -property installationPath)"
+    if [ -z "$VS_PATH" ]; then
+        echo "error: Visual Studio not found via vswhere" >&2
+        exit 1
+    fi
+    export GYP_MSVS_OVERRIDE_PATH="$VS_PATH"
+    export GYP_MSVS_VERSION=2022
+    export vs2022_install="$VS_PATH"
+    echo "using Visual Studio at: $VS_PATH"
+    LIB_NAME="pdfium.lib"
+else
+    LIB_NAME="libpdfium.a"
+fi
 
 mkdir -p "$WORK"
 cd "$WORK"
@@ -44,22 +65,107 @@ export DEPOT_TOOLS_METRICS=0
 # One-time setup of the tools' own Python/CIPD environment (gn, ninja).
 # After that, keep depot_tools pinned at the version we cloned.
 # Called by absolute path: the script locates its own directory from $0.
-if [ ! -f "$WORK/depot_tools/python3_bin_reldir.txt" ]; then
-    "$WORK/depot_tools/ensure_bootstrap"
-fi
-if [ ! -f "$WORK/depot_tools/python3_bin_reldir.txt" ]; then
-    echo "error: depot_tools bootstrap failed (python3_bin_reldir.txt missing)" >&2
-    exit 1
+if [ "$OS" = "win" ]; then
+    # Windows: win_tools.bat installs depot_tools' bundled git, python,
+    # gn and ninja. Without it, gclient's git subprocess is not found
+    # (WinError 2). The .bat wrappers below use these bundled tools.
+    cmd //c "$(cygpath -w "$WORK/depot_tools/bootstrap/win_tools.bat")"
+    GCLIENT="gclient.bat"; GN="gn.bat"; NINJA="ninja.bat"
+else
+    if [ ! -f "$WORK/depot_tools/python3_bin_reldir.txt" ]; then
+        "$WORK/depot_tools/ensure_bootstrap"
+    fi
+    if [ ! -f "$WORK/depot_tools/python3_bin_reldir.txt" ]; then
+        echo "error: depot_tools bootstrap failed (python3_bin_reldir.txt missing)" >&2
+        exit 1
+    fi
+    GCLIENT="gclient"; GN="gn"; NINJA="ninja"
 fi
 export DEPOT_TOOLS_UPDATE=0
 
 if [ ! -f .gclient ]; then
-    gclient config --unmanaged https://pdfium.googlesource.com/pdfium.git \
+    "$GCLIENT" config --unmanaged https://pdfium.googlesource.com/pdfium.git \
         --custom-var checkout_configuration=minimal
 fi
-gclient sync --no-history --shallow --revision "pdfium@$PDFIUM_COMMIT"
+"$GCLIENT" sync --no-history --shallow --revision "pdfium@$PDFIUM_COMMIT"
 
 cd pdfium
+
+# Windows: Chromium pins a specific Windows SDK (e.g. 10.0.28000.0, a
+# preview) that the runner does not have. Pin it to the newest SDK that is
+# actually installed, both through the toolchain env and by rewriting the
+# version wherever the fetched build scripts hardcode it. This is the same
+# kind of allowed edit to fetched third-party build files as the CREL strip.
+if [ "$OS" = "win" ]; then
+    SDK_INC="/c/Program Files (x86)/Windows Kits/10/Include"
+    ALL_SDKS=$(ls "$SDK_INC" 2>/dev/null | grep -E '^10\.' || true)
+    echo "installed Windows SDKs:"; echo "$ALL_SDKS"
+    # Prefer the newest installed SDK, but skip 10.0.26100.0: that 24H2 SDK
+    # shipped a header regression (um/fileapi.h references
+    # FILE_INFO_BY_HANDLE_CLASS before it is declared) that breaks under
+    # clang-cl, the compiler PDFium uses. The workflow installs 22621 for it.
+    # `|| true` keeps `set -e` from killing the script when grep filters all.
+    INSTALLED_SDK=$(echo "$ALL_SDKS" | grep -v '^10\.0\.26100\.0$' | sort -V | tail -1 || true)
+    [ -z "$INSTALLED_SDK" ] && INSTALLED_SDK=$(echo "$ALL_SDKS" | sort -V | tail -1 || true)
+    if [ -z "$INSTALLED_SDK" ]; then
+        echo "error: no Windows 10 SDK found under $SDK_INC" >&2
+        exit 1
+    fi
+    echo "pinning Windows SDK to installed version: $INSTALLED_SDK"
+    # The separately-installed 22621 SDK is incomplete (missing headers/libs
+    # such as dcomp.h). The runner's 26100 SDK is complete but miscompiles
+    # under clang-cl only in a couple of um headers (fileapi.h/winbase.h),
+    # which 22621 provides in good form. So fill 22621's gaps from 26100,
+    # copying only files that are MISSING — never overwriting 22621's own
+    # (good) headers. dcomp.h and friends are version-stable.
+    DONOR="$SDK_INC/10.0.26100.0"
+    DEST="$SDK_INC/$INSTALLED_SDK"
+    SDK_LIB="/c/Program Files (x86)/Windows Kits/10/Lib"
+    if [ -d "$DONOR" ] && [ "$INSTALLED_SDK" != "10.0.26100.0" ]; then
+        for sub in um shared winrt cppwinrt ucrt; do
+            [ -d "$DONOR/$sub" ] || continue
+            mkdir -p "$DEST/$sub"
+            for f in "$DONOR/$sub"/*; do
+                b=$(basename "$f")
+                [ -e "$DEST/$sub/$b" ] || cp -R "$f" "$DEST/$sub/$b"
+            done
+        done
+        # Same gap-fill for import libraries (per-arch subdirs).
+        for sub in um ucrt; do
+            for arch in x64 x86 arm64; do
+                [ -d "$SDK_LIB/10.0.26100.0/$sub/$arch" ] || continue
+                mkdir -p "$SDK_LIB/$INSTALLED_SDK/$sub/$arch"
+                for f in "$SDK_LIB/10.0.26100.0/$sub/$arch"/*; do
+                    b=$(basename "$f")
+                    [ -e "$SDK_LIB/$INSTALLED_SDK/$sub/$arch/$b" ] \
+                        || cp "$f" "$SDK_LIB/$INSTALLED_SDK/$sub/$arch/$b"
+                done
+            done
+        done
+        echo "filled missing 22621 SDK files from 26100"
+    fi
+    # Chromium hardcodes its desired SDK as `SDK_VERSION = '10.0.NNNNN.0'`
+    # (a preview the runner lacks) and appends it to vcvarsall, so env vars
+    # cannot override it. Rewrite that constant to the installed SDK in the
+    # two scripts that define it.
+    for f in build/toolchain/win/setup_toolchain.py build/vs_toolchain.py; do
+        if [ -f "$f" ] && grep -q "^SDK_VERSION = " "$f"; then
+            sed -i "s/^SDK_VERSION = .*/SDK_VERSION = '$INSTALLED_SDK'/" "$f"
+            echo "pinned SDK_VERSION in $f: $(grep '^SDK_VERSION = ' "$f")"
+        fi
+    done
+    # Chromium targets NTDDI_VERSION=NTDDI_WIN11_BR, a symbol only the newest
+    # SDK's sdkddkver.h defines. Under the pinned 22621 SDK it is undefined,
+    # so it evaluates to 0 and the FILE_INFO_BY_HANDLE_CLASS typedef (gated on
+    # NTDDI_VERSION) is dropped while its uses in fileapi.h/winbase.h remain,
+    # giving "unknown type name". Lower it to NTDDI_WIN10_NI, which the 22621
+    # SDK defines (it is that SDK's own NTDDI level).
+    if grep -q 'NTDDI_WIN11_BR' build/config/win/BUILD.gn; then
+        sed -i 's/NTDDI_WIN11_BR/NTDDI_WIN10_NI/g' build/config/win/BUILD.gn
+        echo "lowered NTDDI_VERSION to NTDDI_WIN10_NI in build/config/win/BUILD.gn"
+    fi
+fi
+
 # Chromium enables CREL (compact) relocations on Linux x64 by passing
 # -Wa,--crel,--allow-experimental-crel to the assembler, but only because
 # it links with its own lld. CREL is a 2024 format the host linkers here
@@ -71,26 +177,34 @@ find build -name '*.gn' -o -name '*.gni' 2>/dev/null \
     | xargs grep -l -- '--allow-experimental-crel' 2>/dev/null \
     | xargs -r sed -i '/--allow-experimental-crel/d'
 
-gn gen out/lisa --args="
-    is_debug=false
-    symbol_level=0
-    target_os=\"$OS\"
-    target_cpu=\"$CPU\"
-    pdf_is_standalone=true
-    pdf_is_complete_lib=true
-    pdf_enable_v8=false
-    pdf_enable_xfa=false
-    pdf_use_skia=false
-    is_component_build=false
-    use_custom_libcxx=false
-    clang_use_chrome_plugins=false
-    treat_warnings_as_errors=false
-    use_remoteexec=false
-    use_thin_lto=false
-    is_cfi=false
-    use_allocator_shim=false
-    use_partition_alloc_as_malloc=false
-"
+# Write the build args to args.gn rather than passing --args on the command
+# line: a multi-line --args string is mangled when it goes through the .bat
+# wrapper on Windows, which silently drops back to gn's defaults (where
+# pdf_is_standalone turns pdf_enable_v8 ON and pulls in v8, which the minimal
+# checkout does not fetch). A heredoc is identical on every platform.
+mkdir -p out/lisa
+cat > out/lisa/args.gn <<EOF
+is_debug=false
+symbol_level=0
+target_os="$OS"
+target_cpu="$CPU"
+pdf_is_standalone=true
+pdf_is_complete_lib=true
+pdf_enable_v8=false
+pdf_enable_xfa=false
+pdf_use_skia=false
+is_component_build=false
+use_custom_libcxx=false
+clang_use_chrome_plugins=false
+treat_warnings_as_errors=false
+use_remoteexec=false
+use_thin_lto=false
+is_cfi=false
+use_allocator_shim=false
+use_partition_alloc_as_malloc=false
+EOF
+echo "=== args.gn ==="; cat out/lisa/args.gn
+"$GN" gen out/lisa
 # Thin-LTO (Chromium's default) leaves LLVM bitcode in the object files,
 # which the LLVM linker can read but GNU ld (the default on Linux) cannot
 # ("unknown architecture of input file"). Disabling it, and CFI which
@@ -109,11 +223,11 @@ gn gen out/lisa --args="
 # archive. Removing the flag while keeping lld (which Chromium's own build
 # needs) leaves ordinary relocations that any linker reads. ARM is
 # excluded upstream, which is why macOS was unaffected.
-ninja -C out/lisa pdfium
+"$NINJA" -C out/lisa pdfium
 
 rm -rf "$OUT"
 mkdir -p "$OUT/lib" "$OUT/include"
-cp out/lisa/obj/libpdfium.a "$OUT/lib/"
+cp "out/lisa/obj/$LIB_NAME" "$OUT/lib/"
 cp -R public/. "$OUT/include/"
 cp LICENSE "$OUT/LICENSE"
 cat > "$OUT/VERSION" <<VER
@@ -122,4 +236,4 @@ commit=$PDFIUM_COMMIT
 os=$OS
 cpu=$CPU
 VER
-echo "PDFium built: $OUT/lib/libpdfium.a ($(du -h "$OUT/lib/libpdfium.a" | cut -f1))"
+echo "PDFium built: $OUT/lib/$LIB_NAME ($(du -h "$OUT/lib/$LIB_NAME" | cut -f1))"

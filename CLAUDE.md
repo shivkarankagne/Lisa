@@ -197,7 +197,7 @@ are verified only by CI.
   here handles CREL). This is the one allowed edit to fetched third-party
   build files, and it is documented in the script.
 
-### Windows (x86-64) — core proven
+### Windows (x86-64) — core + PDF proven
 
 - **Do** use `platform_windows.c` (Win32; UTF-8↔UTF-16 at the boundary)
   + `platform_ocr_none.c`. Build with **Clang (MSVC ABI)**, not MSVC:
@@ -206,9 +206,20 @@ are verified only by CI.
 - **Do** guard GCC/Clang-only CMake flags with `if(NOT MSVC)` and link
   the Win32 libraries (bcrypt, shell32, ole32, ws2_32); `libm` is part of
   the CRT, not a separate library.
-- **Don't** build PDF or the native GUI on Windows yet (not done). Tests
-  that use POSIX (`fork`, `unistd.h`) or include `llama.h` directly are
-  guarded off Windows; keep them that way until ported.
+- **Do** link the **static C runtime (/MT)** on Windows
+  (`CMAKE_MSVC_RUNTIME_LIBRARY`): the static PDFium is built with the
+  static CRT, so /MD fails linking with a RuntimeLibrary mismatch, and /MT
+  keeps LISA a single executable (no vcruntime DLL).
+- **Do** build PDF: Windows links the static **`pdfium.lib`** (not
+  `libpdfium.a`) from `build-pdfium-windows.yml` via `fetch_pdfium.sh`.
+  Building it from source needs several Windows-specific steps (depot_tools
+  `win_tools.bat` bootstrap, local VS via `GYP_MSVS_*`, SDK 22621 install +
+  gap-fill from 26100, `NTDDI_WIN11_BR`→`NTDDI_WIN10_NI`, `args.gn`); all
+  are documented in `build_pdfium.sh`.
+- **Don't** build the native GUI on Windows yet (WebView2, not done). OCR
+  is still `platform_ocr_none.c` (Tesseract not yet wired). Tests that use
+  POSIX (`fork`, `unistd.h`) or include `llama.h` directly are guarded off
+  Windows; keep them that way until ported.
 
 ## Branch and CI discipline (how ports don't break `main`)
 
