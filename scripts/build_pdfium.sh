@@ -98,7 +98,17 @@ cd pdfium
 # kind of allowed edit to fetched third-party build files as the CREL strip.
 if [ "$OS" = "win" ]; then
     SDK_INC="/c/Program Files (x86)/Windows Kits/10/Include"
-    INSTALLED_SDK=$(ls "$SDK_INC" 2>/dev/null | grep -E '^10\.' | sort -V | tail -1)
+    echo "installed Windows SDKs:"; ls "$SDK_INC" 2>/dev/null | grep -E '^10\.'
+    # Prefer the newest installed SDK, but skip 10.0.26100.0: that 24H2 SDK
+    # shipped a header regression (um/fileapi.h references
+    # FILE_INFO_BY_HANDLE_CLASS before it is declared) that breaks under
+    # clang-cl, which is the compiler PDFium uses.
+    INSTALLED_SDK=$(ls "$SDK_INC" 2>/dev/null | grep -E '^10\.' \
+        | grep -v '^10\.0\.26100\.0$' | sort -V | tail -1)
+    if [ -z "$INSTALLED_SDK" ]; then
+        # Nothing but the broken SDK; use it and hope a point release fixed it.
+        INSTALLED_SDK=$(ls "$SDK_INC" 2>/dev/null | grep -E '^10\.' | sort -V | tail -1)
+    fi
     if [ -z "$INSTALLED_SDK" ]; then
         echo "error: no Windows 10 SDK found under $SDK_INC" >&2
         exit 1
