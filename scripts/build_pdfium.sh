@@ -127,26 +127,34 @@ find build -name '*.gn' -o -name '*.gni' 2>/dev/null \
     | xargs grep -l -- '--allow-experimental-crel' 2>/dev/null \
     | xargs -r sed -i '/--allow-experimental-crel/d'
 
-"$GN" gen out/lisa --args="
-    is_debug=false
-    symbol_level=0
-    target_os=\"$OS\"
-    target_cpu=\"$CPU\"
-    pdf_is_standalone=true
-    pdf_is_complete_lib=true
-    pdf_enable_v8=false
-    pdf_enable_xfa=false
-    pdf_use_skia=false
-    is_component_build=false
-    use_custom_libcxx=false
-    clang_use_chrome_plugins=false
-    treat_warnings_as_errors=false
-    use_remoteexec=false
-    use_thin_lto=false
-    is_cfi=false
-    use_allocator_shim=false
-    use_partition_alloc_as_malloc=false
-"
+# Write the build args to args.gn rather than passing --args on the command
+# line: a multi-line --args string is mangled when it goes through the .bat
+# wrapper on Windows, which silently drops back to gn's defaults (where
+# pdf_is_standalone turns pdf_enable_v8 ON and pulls in v8, which the minimal
+# checkout does not fetch). A heredoc is identical on every platform.
+mkdir -p out/lisa
+cat > out/lisa/args.gn <<EOF
+is_debug=false
+symbol_level=0
+target_os="$OS"
+target_cpu="$CPU"
+pdf_is_standalone=true
+pdf_is_complete_lib=true
+pdf_enable_v8=false
+pdf_enable_xfa=false
+pdf_use_skia=false
+is_component_build=false
+use_custom_libcxx=false
+clang_use_chrome_plugins=false
+treat_warnings_as_errors=false
+use_remoteexec=false
+use_thin_lto=false
+is_cfi=false
+use_allocator_shim=false
+use_partition_alloc_as_malloc=false
+EOF
+echo "=== args.gn ==="; cat out/lisa/args.gn
+"$GN" gen out/lisa
 # Thin-LTO (Chromium's default) leaves LLVM bitcode in the object files,
 # which the LLVM linker can read but GNU ld (the default on Linux) cannot
 # ("unknown architecture of input file"). Disabling it, and CFI which
