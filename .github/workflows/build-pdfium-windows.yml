@@ -31,6 +31,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The runner ships only Windows SDK 10.0.26100.0 (24H2), whose headers
+      # miscompile under clang-cl (FILE_INFO_BY_HANDLE_CLASS). Install the
+      # 22621 SDK so the build has a clang-cl-safe toolchain to pin to.
+      - name: Install Windows SDK 10.0.22621
+        uses: GuillaumeFalourd/setup-windows10-sdk-action@v2
+        with:
+          sdk-version: 22621
+
       - name: Build static PDFium
         run: scripts/build_pdfium.sh
 
