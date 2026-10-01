@@ -90,6 +90,30 @@ fi
 "$GCLIENT" sync --no-history --shallow --revision "pdfium@$PDFIUM_COMMIT"
 
 cd pdfium
+
+# Windows: Chromium pins a specific Windows SDK (e.g. 10.0.28000.0, a
+# preview) that the runner does not have. Pin it to the newest SDK that is
+# actually installed, both through the toolchain env and by rewriting the
+# version wherever the fetched build scripts hardcode it. This is the same
+# kind of allowed edit to fetched third-party build files as the CREL strip.
+if [ "$OS" = "win" ]; then
+    SDK_INC="/c/Program Files (x86)/Windows Kits/10/Include"
+    INSTALLED_SDK=$(ls "$SDK_INC" 2>/dev/null | grep -E '^10\.' | sort -V | tail -1)
+    if [ -z "$INSTALLED_SDK" ]; then
+        echo "error: no Windows 10 SDK found under $SDK_INC" >&2
+        exit 1
+    fi
+    echo "pinning Windows SDK to installed version: $INSTALLED_SDK"
+    export WINDOWSSDKVERSION="$INSTALLED_SDK"
+    export WindowsSdkVerBinPath="/c/Program Files (x86)/Windows Kits/10/bin/$INSTALLED_SDK/"
+    REQUIRED_SDK=$(grep -rhoE '10\.0\.[0-9]+\.0' build/vs_toolchain.py 2>/dev/null | sort -u | head -1)
+    if [ -n "$REQUIRED_SDK" ] && [ "$REQUIRED_SDK" != "$INSTALLED_SDK" ]; then
+        echo "rewriting Chromium SDK $REQUIRED_SDK -> $INSTALLED_SDK"
+        grep -rlE "$REQUIRED_SDK" build/ 2>/dev/null \
+            | xargs -r sed -i "s/${REQUIRED_SDK//./\\.}/$INSTALLED_SDK/g"
+    fi
+fi
+
 # Chromium enables CREL (compact) relocations on Linux x64 by passing
 # -Wa,--crel,--allow-experimental-crel to the assembler, but only because
 # it links with its own lld. CREL is a 2024 format the host linkers here
