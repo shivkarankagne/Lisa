@@ -21,6 +21,15 @@ if(APPLE)
     enable_language(OBJC)
 endif()
 
+# Windows: link the static C runtime (/MT). The prebuilt static PDFium is
+# built with is_component_build=false, which uses the static CRT; mixing it
+# with the default dynamic CRT (/MD) fails linking with a RuntimeLibrary
+# mismatch. Static CRT also keeps LISA a single executable (no vcruntime
+# DLL dependency). CMP0091 (NEW since our cmake_minimum) makes this abstract.
+if(WIN32)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+
 option(LISA_SANITIZE         "Build with AddressSanitizer + UndefinedBehaviorSanitizer" OFF)
 option(LISA_BUILD_TESTS      "Build tests"      ON)
 option(LISA_BUILD_BENCHMARKS "Build benchmarks" OFF)
