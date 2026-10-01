@@ -53,6 +53,11 @@ int lisa_path_exists(const char* path);
  * Returns a malloc'd string, or NULL if the path does not exist. */
 char* lisa_path_absolute(const char* path);
 
+/* 1 if path is absolute in this OS's syntax, else 0. POSIX: a leading '/'.
+ * Windows: a drive path ("C:\" or "C:/") or a UNC path ("\\" or "//").
+ * Does not touch the filesystem; the path need not exist. */
+int lisa_path_is_absolute(const char* path);
+
 /* ---- directories and files ------------------------------------------ */
 
 typedef struct {

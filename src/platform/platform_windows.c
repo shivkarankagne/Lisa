@@ -82,6 +82,17 @@ char lisa_path_sep(void) {
     return '\\';
 }
 
+int lisa_path_is_absolute(const char* path) {
+    if (path == NULL) return 0;
+    /* UNC path: "\\server\share" or "//server/share". */
+    if ((path[0] == '\\' || path[0] == '/') &&
+        (path[1] == '\\' || path[1] == '/')) return 1;
+    /* Drive path: "C:\" or "C:/" (a drive-relative "C:foo" is not absolute). */
+    if (((path[0] >= 'A' && path[0] <= 'Z') || (path[0] >= 'a' && path[0] <= 'z')) &&
+        path[1] == ':' && (path[2] == '\\' || path[2] == '/')) return 1;
+    return 0;
+}
+
 char* lisa_path_join(const char* dir, const char* name) {
     if (dir == NULL || name == NULL) return NULL;
     size_t dl = strlen(dir), nl = strlen(name);

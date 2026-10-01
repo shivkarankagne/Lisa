@@ -46,6 +46,10 @@ char lisa_path_sep(void) {
     return '/';
 }
 
+int lisa_path_is_absolute(const char* path) {
+    return path != NULL && path[0] == '/';
+}
+
 char* lisa_path_join(const char* dir, const char* name) {
     if (dir == NULL || name == NULL) return NULL;
     size_t dl = strlen(dir);
