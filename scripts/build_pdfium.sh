@@ -112,6 +112,38 @@ if [ "$OS" = "win" ]; then
         exit 1
     fi
     echo "pinning Windows SDK to installed version: $INSTALLED_SDK"
+    # The separately-installed 22621 SDK is incomplete (missing headers/libs
+    # such as dcomp.h). The runner's 26100 SDK is complete but miscompiles
+    # under clang-cl only in a couple of um headers (fileapi.h/winbase.h),
+    # which 22621 provides in good form. So fill 22621's gaps from 26100,
+    # copying only files that are MISSING — never overwriting 22621's own
+    # (good) headers. dcomp.h and friends are version-stable.
+    DONOR="$SDK_INC/10.0.26100.0"
+    DEST="$SDK_INC/$INSTALLED_SDK"
+    SDK_LIB="/c/Program Files (x86)/Windows Kits/10/Lib"
+    if [ -d "$DONOR" ] && [ "$INSTALLED_SDK" != "10.0.26100.0" ]; then
+        for sub in um shared winrt cppwinrt ucrt; do
+            [ -d "$DONOR/$sub" ] || continue
+            mkdir -p "$DEST/$sub"
+            for f in "$DONOR/$sub"/*; do
+                b=$(basename "$f")
+                [ -e "$DEST/$sub/$b" ] || cp -R "$f" "$DEST/$sub/$b"
+            done
+        done
+        # Same gap-fill for import libraries (per-arch subdirs).
+        for sub in um ucrt; do
+            for arch in x64 x86 arm64; do
+                [ -d "$SDK_LIB/10.0.26100.0/$sub/$arch" ] || continue
+                mkdir -p "$SDK_LIB/$INSTALLED_SDK/$sub/$arch"
+                for f in "$SDK_LIB/10.0.26100.0/$sub/$arch"/*; do
+                    b=$(basename "$f")
+                    [ -e "$SDK_LIB/$INSTALLED_SDK/$sub/$arch/$b" ] \
+                        || cp "$f" "$SDK_LIB/$INSTALLED_SDK/$sub/$arch/$b"
+                done
+            done
+        done
+        echo "filled missing 22621 SDK files from 26100"
+    fi
     # Chromium hardcodes its desired SDK as `SDK_VERSION = '10.0.NNNNN.0'`
     # (a preview the runner lacks) and appends it to vcvarsall, so env vars
     # cannot override it. Rewrite that constant to the installed SDK in the
