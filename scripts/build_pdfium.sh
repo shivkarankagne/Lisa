@@ -154,6 +154,16 @@ if [ "$OS" = "win" ]; then
             echo "pinned SDK_VERSION in $f: $(grep '^SDK_VERSION = ' "$f")"
         fi
     done
+    # Chromium targets NTDDI_VERSION=NTDDI_WIN11_BR, a symbol only the newest
+    # SDK's sdkddkver.h defines. Under the pinned 22621 SDK it is undefined,
+    # so it evaluates to 0 and the FILE_INFO_BY_HANDLE_CLASS typedef (gated on
+    # NTDDI_VERSION) is dropped while its uses in fileapi.h/winbase.h remain,
+    # giving "unknown type name". Lower it to NTDDI_WIN10_NI, which the 22621
+    # SDK defines (it is that SDK's own NTDDI level).
+    if grep -q 'NTDDI_WIN11_BR' build/config/win/BUILD.gn; then
+        sed -i 's/NTDDI_WIN11_BR/NTDDI_WIN10_NI/g' build/config/win/BUILD.gn
+        echo "lowered NTDDI_VERSION to NTDDI_WIN10_NI in build/config/win/BUILD.gn"
+    fi
 fi
 
 # Chromium enables CREL (compact) relocations on Linux x64 by passing
