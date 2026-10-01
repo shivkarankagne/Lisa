@@ -180,16 +180,27 @@ target_compile_options(lisa_utf8proc PRIVATE -w)
 # by scripts/fetch_pdfium.sh. Required for PDF support.
 set(LISA_PDFIUM_DIR "${CMAKE_SOURCE_DIR}/.deps/pdfium" CACHE PATH "Static PDFium build")
 option(LISA_REQUIRE_PDF "Fail if PDFium is not available" ON)
-if(EXISTS "${LISA_PDFIUM_DIR}/lib/libpdfium.a")
+# The static archive is libpdfium.a on mac/linux, pdfium.lib on Windows.
+if(WIN32)
+    set(LISA_PDFIUM_LIB "${LISA_PDFIUM_DIR}/lib/pdfium.lib")
+else()
+    set(LISA_PDFIUM_LIB "${LISA_PDFIUM_DIR}/lib/libpdfium.a")
+endif()
+if(EXISTS "${LISA_PDFIUM_LIB}")
     set(LISA_HAVE_PDFIUM ON)
     add_library(lisa_pdfium STATIC IMPORTED)
     set_target_properties(lisa_pdfium PROPERTIES
-        IMPORTED_LOCATION "${LISA_PDFIUM_DIR}/lib/libpdfium.a"
+        IMPORTED_LOCATION "${LISA_PDFIUM_LIB}"
         INTERFACE_INCLUDE_DIRECTORIES "${LISA_PDFIUM_DIR}/include")
     if(APPLE)
         target_link_libraries(lisa_pdfium INTERFACE
             "-framework AppKit" "-framework CoreFoundation" "-framework CoreGraphics"
             "-framework Foundation" "-framework Security")
+    elseif(WIN32)
+        # PDFium's own Win32 dependencies (GDI, COM, imaging, text).
+        target_link_libraries(lisa_pdfium INTERFACE
+            gdi32 user32 advapi32 kernel32 ole32 oleaut32 shell32
+            version winmm usp10 windowscodecs propsys)
     else()
         # The static PDFium (built with use_custom_libcxx=false) uses the
         # system C++ runtime and needs threads and dlopen.

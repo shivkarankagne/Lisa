@@ -13,10 +13,6 @@ name: build pdfium windows
 
 on:
   workflow_dispatch:
-  # TEMP (feat/windows-pdfium): run on each push to this branch while the
-  # Windows build is being brought up. Remove before merge.
-  push:
-    branches: [feat/windows-pdfium]
 
 permissions:
   contents: write
