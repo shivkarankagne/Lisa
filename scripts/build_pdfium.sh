@@ -106,12 +106,15 @@ if [ "$OS" = "win" ]; then
     echo "pinning Windows SDK to installed version: $INSTALLED_SDK"
     export WINDOWSSDKVERSION="$INSTALLED_SDK"
     export WindowsSdkVerBinPath="/c/Program Files (x86)/Windows Kits/10/bin/$INSTALLED_SDK/"
-    REQUIRED_SDK=$(grep -rhoE '10\.0\.[0-9]+\.0' build/vs_toolchain.py 2>/dev/null | sort -u | head -1)
-    if [ -n "$REQUIRED_SDK" ] && [ "$REQUIRED_SDK" != "$INSTALLED_SDK" ]; then
-        echo "rewriting Chromium SDK $REQUIRED_SDK -> $INSTALLED_SDK"
-        grep -rlE "$REQUIRED_SDK" build/ 2>/dev/null \
-            | xargs -r sed -i "s/${REQUIRED_SDK//./\\.}/$INSTALLED_SDK/g"
-    fi
+    # Rewrite every pinned SDK version that is not the installed one. Chromium
+    # hardcodes its desired version (a preview like 10.0.28000.0) in several
+    # build files; point them all at the SDK the runner actually has.
+    for V in $(grep -rhoE '10\.0\.[0-9]{5}\.0' build/ 2>/dev/null | sort -u); do
+        [ "$V" = "$INSTALLED_SDK" ] && continue
+        echo "rewriting Chromium SDK $V -> $INSTALLED_SDK in:"
+        grep -rlE "$V" build/ 2>/dev/null | tee /dev/stderr \
+            | xargs -r sed -i "s/${V//./\\.}/$INSTALLED_SDK/g"
+    done
 fi
 
 # Chromium enables CREL (compact) relocations on Linux x64 by passing
