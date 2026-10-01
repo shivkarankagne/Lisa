@@ -218,6 +218,7 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
           -DLISA_MODELS_DIR=nonexistent
+          -DLISA_ENABLE_TESSERACT=OFF
 
       - name: Build
         run: cmake --build build -j
@@ -275,6 +276,7 @@ jobs:
           -DCMAKE_BUILD_TYPE=Release
           -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++
           -DLISA_BUILD_TESTS=OFF -DLISA_REQUIRE_PDF=OFF
+          -DLISA_ENABLE_TESSERACT=OFF
 
       - name: Build
         run: cmake --build build -j

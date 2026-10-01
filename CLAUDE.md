@@ -183,11 +183,11 @@ are verified only by CI.
 - **Don't** let a Linux or Windows change alter macOS behaviour or its
   test results. If it would, the seam is wrong — stop and ask.
 
-### Linux (x86-64) — headless
+### Linux (x86-64) — headless + OCR
 
-- **Do** use `platform_posix.c` (shared with macOS) + `platform_ocr_none.c`
-  (OCR returns "no text"). Link with **mold or lld** — GNU `ld` cannot
-  read the Chromium-built PDFium objects.
+- **Do** use `platform_posix.c` (shared with macOS) + `platform_ocr_tesseract.c`
+  (Tesseract/Leptonica built in-tree, see "OCR" below). Link with **mold or
+  lld** — GNU `ld` cannot read the Chromium-built PDFium objects.
 - **Do** fetch the **static** PDFium built from source
   (`build-pdfium-linux.yml` publishes it, `fetch_pdfium.sh` downloads it).
 - **Don't** link the PDFium `.so` from pdfium-binaries — it breaks the
@@ -216,10 +216,29 @@ are verified only by CI.
   `win_tools.bat` bootstrap, local VS via `GYP_MSVS_*`, SDK 22621 install +
   gap-fill from 26100, `NTDDI_WIN11_BR`→`NTDDI_WIN10_NI`, `args.gn`); all
   are documented in `build_pdfium.sh`.
-- **Don't** build the native GUI on Windows yet (WebView2, not done). OCR
-  is still `platform_ocr_none.c` (Tesseract not yet wired). Tests that use
-  POSIX (`fork`, `unistd.h`) or include `llama.h` directly are guarded off
-  Windows; keep them that way until ported.
+- **Don't** build the native GUI on Windows yet (WebView2, not done).
+- **Don't** enable Tesseract OCR on Windows yet: the Windows CI configures
+  with `-DLISA_ENABLE_TESSERACT=OFF`, so it uses `platform_ocr_none.c`
+  (scans report "no text"). Tesseract fails to compile under the runner's
+  clang 20 + MSVC 14.51 STL — `<string_view>` pulls `<x86intrin.h>`, which
+  hits a clang-20 bug in `mmintrin.h` (target-attribute SSE2 vector types
+  treated as scalar). No compile flag fixes it; it needs a different LLVM.
+  Re-enable once the toolchain is updated. Tests that use POSIX (`fork`,
+  `unistd.h`) or include `llama.h` directly are guarded off Windows; keep
+  them that way until ported.
+
+### OCR (Tesseract + Leptonica)
+
+- **Do** build OCR in-tree on non-Apple via `LISA_ENABLE_TESSERACT`
+  (default ON): `add_subdirectory(third_party/{leptonica,tesseract})`.
+  Leptonica with every image codec off (we feed raw BGRx), Tesseract as the
+  full engine (disabling the legacy engine / ScrollView leaves undefined
+  references). `eng.traineddata` is embedded (`cmake/embed_tessdata.cmake`)
+  and extracted once to the data dir, so the binary stays self-contained.
+- **Do** keep macOS on Apple Vision (`platform_macos.m`); the OCR seam
+  (`lisa_ocr_available` / `lisa_ocr_image`, BGRx in, text out) is identical.
+- **Don't** let Tesseract pull image codecs or ICU; the model is English,
+  LSTM-selected at runtime (`OEM_LSTM_ONLY`).
 
 ## Branch and CI discipline (how ports don't break `main`)
 
