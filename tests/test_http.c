@@ -137,6 +137,20 @@ static const char* err_code(void) {
     return field("error.code", b, sizeof(b));
 }
 
+/* A path for embedding in a JSON string literal: backslashes doubled so a
+ * Windows path (C:\...) is valid JSON. Identity on POSIX. The parsed value,
+ * and the JSON the server echoes back, both carry the single-backslash form. */
+static const char* jesc(const char* s) {
+    static char buf[2048];
+    size_t j = 0;
+    for (size_t i = 0; s[i] && j + 2 < sizeof(buf); i++) {
+        if (s[i] == '\\') buf[j++] = '\\';
+        buf[j++] = s[i];
+    }
+    buf[j] = '\0';
+    return buf;
+}
+
 /* ---- model-free -------------------------------------------------------- */
 
 static void test_health_and_token(void) {
@@ -344,13 +358,13 @@ static void test_static_files_and_settings(void) {
     TEST_ASSERT_EQUAL_INT(405, http_at(port, "DELETE", "/v1/settings", h, 1, NULL));
     /* Watched folders: set, read back, and rejected when wrong. */
     char watch[1200];
-    snprintf(watch, sizeof(watch), "{\"watch\":{\"collection\":\"watched\",\"folders\":[\"%s\"]}}", g_scratch);
+    snprintf(watch, sizeof(watch), "{\"watch\":{\"collection\":\"watched\",\"folders\":[\"%s\"]}}", jesc(g_scratch));
     TEST_ASSERT_EQUAL_INT(200, http_at(port, "POST", "/v1/settings", h, 1, watch));
     TEST_ASSERT_EQUAL_STRING("false", field("restart_required", b, sizeof(b)));   /* applies at once */
     TEST_ASSERT_EQUAL_STRING("true", field("watching", b, sizeof(b)));
     TEST_ASSERT_EQUAL_INT(200, http_at(port, "GET", "/v1/settings", h, 1, NULL));
     TEST_ASSERT_EQUAL_STRING("watched", field("watch.collection", b, sizeof(b)));
-    TEST_ASSERT_NOT_NULL(strstr(g_body, g_scratch));
+    TEST_ASSERT_NOT_NULL(strstr(g_body, jesc(g_scratch)));   /* JSON-escaped in the body */
     TEST_ASSERT_NOT_NULL(strstr(g_body, "\"suggested\""));
     TEST_ASSERT_EQUAL_INT(400, http_at(port, "POST", "/v1/settings", h, 1,
                                        "{\"watch\":{\"collection\":\"watched\",\"folders\":[\"relative\"]}}"));
