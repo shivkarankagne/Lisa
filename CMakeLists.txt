@@ -170,6 +170,10 @@ if(WIN32)
 endif()
 
 # webview (third_party/webview/INTAKE.md): native window for `lisa gui`.
+# macOS → WKWebView; Windows → WebView2 (built-in loader, so no
+# WebView2Loader.dll to ship; the WebView2.h SDK header is vendored). Linux
+# would need GTK/WebKitGTK, which breaks the single-executable rule, so Linux
+# uses the browser instead.
 if(APPLE)
     add_library(lisa_webview STATIC third_party/webview/src/webview.cc)
     target_include_directories(lisa_webview PUBLIC third_party/webview/include)
@@ -177,6 +181,14 @@ if(APPLE)
     target_compile_features(lisa_webview PRIVATE cxx_std_11)
     target_compile_options(lisa_webview PRIVATE -w)
     target_link_libraries(lisa_webview PUBLIC "-framework WebKit" "-framework Cocoa")
+elseif(WIN32)
+    add_library(lisa_webview STATIC third_party/webview/src/webview.cc)
+    target_include_directories(lisa_webview PUBLIC third_party/webview/include)
+    target_compile_definitions(lisa_webview PUBLIC WEBVIEW_STATIC)
+    target_compile_features(lisa_webview PRIVATE cxx_std_17)
+    target_compile_options(lisa_webview PRIVATE -w -fexceptions)
+    # The WebView2 COM loader + Shell APIs webview.h uses.
+    target_link_libraries(lisa_webview PUBLIC ole32 shell32 shlwapi advapi32 user32 version)
 endif()
 
 add_library(lisa_utf8proc STATIC third_party/utf8proc/utf8proc.c)
@@ -279,8 +291,8 @@ target_include_directories(lisa_core PUBLIC include src)
 if(WIN32)
     target_link_libraries(lisa_core PUBLIC lisa_sqlite PRIVATE llama vendor::hash lisa_md4c lisa_utf8proc lisa_miniz)
     # Win32 backends: BCryptGenRandom, SHGetKnownFolderPath/CoTaskMemFree,
-    # ShellExecute.
-    target_link_libraries(lisa_core PRIVATE bcrypt shell32 ole32)
+    # ShellExecute, IFileOpenDialog (uuid provides its CLSID/IID GUIDs).
+    target_link_libraries(lisa_core PRIVATE bcrypt shell32 ole32 uuid)
 else()
     target_link_libraries(lisa_core PUBLIC lisa_sqlite m PRIVATE llama vendor::hash lisa_md4c lisa_utf8proc lisa_miniz)
 endif()
@@ -386,7 +398,7 @@ add_custom_command(
     VERBATIM)
 add_library(lisa_gui STATIC ${CMAKE_BINARY_DIR}/gui_assets.c src/gui/window.c)
 target_link_libraries(lisa_gui PUBLIC lisa_app)
-if(APPLE)
+if(APPLE OR WIN32)
     target_link_libraries(lisa_gui PUBLIC lisa_webview)
     target_compile_definitions(lisa_gui PRIVATE LISA_HAVE_WEBVIEW)
 endif()

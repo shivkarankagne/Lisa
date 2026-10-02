@@ -32,3 +32,12 @@ only in 1.0; other platforms add their web view dependency when ported.
 
 Download the new tag archive, record its SHA-256, replace the three
 files, update this record, run the full test suite and open `lisa gui`.
+
+## WebView2 headers (Windows)
+
+- include/webview/WebView2.h and WebView2EnvironmentOptions.h are vendored
+  from the Microsoft.Web.WebView2 NuGet package (v1.0.2903.40,
+  build/native/include/). webview.h includes "WebView2.h" on Windows.
+- webview uses its built-in WebView2 loader (WEBVIEW_MSWEBVIEW2_BUILTIN_IMPL),
+  so no WebView2Loader.dll is shipped — the single-executable rule holds. The
+  WebView2 Evergreen runtime is present by default on Windows 10/11.

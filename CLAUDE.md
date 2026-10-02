@@ -226,9 +226,15 @@ are verified only by CI.
   (`<string_view>` → `<x86intrin.h>` → SSE2 vector types seen as scalar; no
   compile flag fixes it). The CMake Tesseract block is guarded
   `NOT APPLE AND NOT WIN32`, so Windows never touches it.
-- **Don't** build the native GUI on Windows yet (WebView2, not done). Tests
-  that use POSIX (`fork`, `unistd.h`) or include `llama.h` directly are
-  guarded off Windows; keep them that way until ported.
+- **Do** build the native GUI on Windows via WebView2 (`lisa gui`): CMake
+  builds `lisa_webview` from the vendored webview + WebView2.h on WIN32 and
+  links it into `lisa_gui` (LISA_HAVE_WEBVIEW). webview's built-in loader
+  means no WebView2Loader.dll ships (single-exe holds). The folder picker is
+  `IFileOpenDialog` in platform_windows.c (links `uuid` for its GUIDs);
+  drag-and-drop onto the window is not wired yet. Linux keeps the browser GUI
+  (GTK/WebKitGTK would break single-exe).
+- **Don't** forget: tests that use POSIX (`fork`, `unistd.h`) or include
+  `llama.h` directly are guarded off Windows; keep them that way until ported.
 
 ### OCR (per-OS system recogniser, Tesseract only where there is none)
 
