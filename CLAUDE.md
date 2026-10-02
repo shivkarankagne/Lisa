@@ -235,6 +235,13 @@ are verified only by CI.
   (GTK/WebKitGTK would break single-exe).
 - **Don't** forget: tests that use POSIX (`fork`, `unistd.h`) or include
   `llama.h` directly are guarded off Windows; keep them that way until ported.
+- **Windows remaining (tracked):** the release build (`scripts/release.sh`)
+  runs the "Windows-clean subset" — it excludes `test_cli` (hangs) and
+  `test_http` (its `test_static_files_and_settings` and
+  `test_ingest_search_ask` return 400 only when a real model is loaded) on
+  Windows, matching CI. These are the model-backed CLI/HTTP paths not yet
+  validated on Windows; fix and re-include them. Packaging itself (zip +
+  single-exe check) is done.
 
 ### OCR (per-OS system recogniser, Tesseract only where there is none)
 
