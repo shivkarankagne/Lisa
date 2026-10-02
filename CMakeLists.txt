@@ -285,22 +285,14 @@ else()
     target_link_libraries(lisa_core PUBLIC lisa_sqlite m PRIVATE llama vendor::hash lisa_md4c lisa_utf8proc lisa_miniz)
 endif()
 # Tesseract OCR (third_party/{leptonica,tesseract}): the OCR backend on Linux
-# and Windows; macOS uses Apple Vision instead. Both are built in-tree as
-# static libraries — Leptonica with every image codec off (we feed raw BGRx
-# pixels) and Tesseract LSTM-only — and the English model is embedded, so the
-# executable stays self-contained.
-option(LISA_ENABLE_TESSERACT "Build in-tree Tesseract OCR (non-Apple)" ON)
-if(NOT APPLE AND LISA_ENABLE_TESSERACT)
-    # Windows/clang-cl: Tesseract headers pull in <intrin.h>, which drags in
-    # clang 20's <mmintrin.h>; that header miscompiles unless MMX/SSE target
-    # features are enabled. Build the vendored libs with -mssse3 so the MMX
-    # intrinsics lower correctly. Scoped to this block, then restored.
-    set(_lisa_saved_c_flags "${CMAKE_C_FLAGS}")
-    set(_lisa_saved_cxx_flags "${CMAKE_CXX_FLAGS}")
-    if(WIN32)
-        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -mssse3")
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -mssse3")
-    endif()
+# only. macOS uses Apple Vision and Windows uses Windows.Media.Ocr (both are
+# system recognisers); Linux has none, so it builds Tesseract in-tree as a
+# static library — Leptonica with every image codec off (we feed raw BGRx
+# pixels) — and the English model is embedded, so the executable stays
+# self-contained. Not built on Windows: Tesseract's heavy <string_view> use
+# trips a clang-20 <mmintrin.h> bug there (see src/platform notes).
+option(LISA_ENABLE_TESSERACT "Build in-tree Tesseract OCR (Linux only)" ON)
+if(NOT APPLE AND NOT WIN32 AND LISA_ENABLE_TESSERACT)
     set(BUILD_PROG OFF CACHE BOOL "" FORCE)
     set(SW_BUILD OFF CACHE BOOL "" FORCE)
     foreach(x ZLIB PNG GIF JPEG TIFF WEBP OPENJPEG)
@@ -327,9 +319,6 @@ if(NOT APPLE AND LISA_ENABLE_TESSERACT)
     set(INSTALL_CONFIGS OFF CACHE BOOL "" FORCE)
     add_subdirectory(third_party/tesseract EXCLUDE_FROM_ALL)
 
-    set(CMAKE_C_FLAGS "${_lisa_saved_c_flags}")
-    set(CMAKE_CXX_FLAGS "${_lisa_saved_cxx_flags}")
-
     add_custom_command(
         OUTPUT ${CMAKE_BINARY_DIR}/tessdata_eng.c
         COMMAND ${CMAKE_COMMAND} -DOUT=${CMAKE_BINARY_DIR}/tessdata_eng.c
@@ -346,8 +335,16 @@ if(APPLE)
     target_sources(lisa_core PRIVATE src/platform/platform_macos.m)
     set_source_files_properties(src/platform/platform_macos.m PROPERTIES COMPILE_OPTIONS "-fno-objc-arc")
     target_link_libraries(lisa_core PUBLIC "-framework Cocoa" "-framework Vision")
+elseif(WIN32)
+    # Windows: system OCR via Windows.Media.Ocr (C++/WinRT), the same "use the
+    # OS recogniser" approach as macOS Vision. No bundled model, no Tesseract.
+    target_sources(lisa_core PRIVATE src/platform/platform_ocr_windows.cpp)
+    set_source_files_properties(src/platform/platform_ocr_windows.cpp PROPERTIES
+        COMPILE_OPTIONS "-std=c++20;-fexceptions;-frtti")
+    # WindowsApp.lib is the umbrella import lib for the WinRT APIs.
+    target_link_libraries(lisa_core PRIVATE windowsapp)
 elseif(LISA_HAVE_TESSERACT)
-    # Linux/Windows: Tesseract over Leptonica, with the model embedded.
+    # Linux: Tesseract over Leptonica, with the model embedded.
     target_sources(lisa_core PRIVATE
         src/platform/platform_ocr_tesseract.c ${CMAKE_BINARY_DIR}/tessdata_eng.c)
     target_include_directories(lisa_core PRIVATE

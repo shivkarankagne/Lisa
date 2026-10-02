@@ -1,0 +1,5 @@
+LISA 0.6.0 serving http://127.0.0.1:8731/v1 (local only)
+Session token: 104bfca7f66a3ad10f2e5b33ab1b6a5861654a430d4efe70
+Send it as 'Authorization: Bearer <token>'. GUI: http://127.0.0.1:8731/#token=104bfca7f66a3ad10f2e5b33ab1b6a5861654a430d4efe70
+Ctrl-C stops the server.
+Stopping...
