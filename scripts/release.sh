@@ -25,12 +25,18 @@ ARCH=$(uname -m)
 CMAKE_EXTRA=""
 BINEXT=""
 ARCHIVE=tar.gz
+# Tests skipped during the release check. test_gui needs a browser (covered in
+# CI). On Windows, test_cli/test_http/test_store_crash are not yet ported to
+# the model-backed path (same "Windows-clean subset" CI uses); tracked in
+# CLAUDE.md under Windows remaining work.
+CTEST_EXCLUDE="test_gui"
 case "$(uname -s)" in
     Darwin) OS=macos; NPROC=$(sysctl -n hw.ncpu); FILESIZE='stat -f%z' ;;
     Linux)  OS=linux; NPROC=$(nproc);             FILESIZE='stat -c%s' ;;
     MINGW*|MSYS*|CYGWIN*)
         OS=windows; NPROC=$(nproc); FILESIZE='stat -c%s'
         BINEXT=.exe; ARCHIVE=zip
+        CTEST_EXCLUDE="test_gui|test_cli|test_http|test_store_crash"
         CMAKE_EXTRA="-G Ninja -DCMAKE_C_COMPILER=clang -DCMAKE_CXX_COMPILER=clang++" ;;
     *) echo "unsupported OS: $(uname -s)" >&2; exit 1 ;;
 esac
@@ -87,7 +93,7 @@ fi
 echo "    size: $($FILESIZE "$BIN") bytes"
 
 echo "==> Tests (model tests need models/; the GUI test needs a browser, covered in CI)"
-ctest --test-dir build-release --output-on-failure -E test_gui
+ctest --test-dir build-release --output-on-failure --timeout 1200 -E "$CTEST_EXCLUDE"
 
 echo "==> Packaging"
 ARCHIVE_FILE="$NAME.$ARCHIVE"
