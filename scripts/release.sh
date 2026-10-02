@@ -87,7 +87,7 @@ fi
 echo "    size: $($FILESIZE "$BIN") bytes"
 
 echo "==> Tests (model tests need models/; the GUI test needs a browser, covered in CI)"
-ctest --test-dir build-release --output-on-failure -E test_gui >/dev/null
+ctest --test-dir build-release --output-on-failure -E test_gui
 
 echo "==> Packaging"
 ARCHIVE_FILE="$NAME.$ARCHIVE"
