@@ -1,11 +1,11 @@
 # SPDX-License-Identifier: BUSL-1.1
 #
 # Build and package LISA for each platform with scripts/release.sh, and
-# upload the tarballs as build artifacts. Run manually. With inputs.publish
+# upload the archives as build artifacts. Run manually. With inputs.publish
 # set to "yes" it also attaches them to the GitHub release v<version>.
 #
 # It verifies the whole release path per platform, including the
-# single-executable check (otool on macOS, ldd on Linux).
+# single-executable check (otool on macOS, ldd on Linux, dumpbin on Windows).
 
 name: release
 
@@ -27,9 +27,13 @@ jobs:
         include:
           - { os: macos-15,      name: macOS }
           - { os: ubuntu-latest, name: Linux }
+          - { os: windows-latest, name: Windows }
     name: ${{ matrix.name }} package
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 120
+    timeout-minutes: 150
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v4
 
@@ -39,6 +43,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y lld mold
 
+      - name: Toolchain versions
+        run: |
+          cmake --version
+          clang --version || true
+          ninja --version || true
+
       - name: Cache models
         uses: actions/cache@v4
         with:
@@ -47,11 +57,15 @@ jobs:
 
       - name: Download models (verified)
         run: |
+          sha() {  # portable SHA-256
+            if command -v sha256sum >/dev/null 2>&1; then sha256sum "$@";
+            else shasum -a 256 "$@"; fi
+          }
           mkdir -p models
           get() {  # repo revision file sha256
             if [ ! -f "models/$3" ]; then
               curl -sfL --retry 5 -o "models/$3.part" "https://huggingface.co/$1/resolve/$2/$3"
-              echo "$4  models/$3.part" | shasum -a 256 -c -
+              echo "$4  models/$3.part" | sha -c -
               mv "models/$3.part" "models/$3"
             fi
           }
@@ -75,8 +89,10 @@ jobs:
             scripts/release.sh
           fi
 
-      - name: Upload the tarball as a build artifact
+      - name: Upload the archive as a build artifact
         uses: actions/upload-artifact@v4
         with:
           name: lisa-${{ matrix.name }}
-          path: dist/*.tar.gz*
+          path: |
+            dist/*.tar.gz*
+            dist/*.zip*
