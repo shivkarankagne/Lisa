@@ -22,6 +22,11 @@
 #include <mutex>
 #include <string>
 
+/* Make ::IUnknown a complete type before the C++/WinRT headers, so that
+ * reference.as<IMemoryBufferByteAccess>() below resolves to the classic-COM
+ * QueryInterface path rather than WinRT's value-boxing path. */
+#include <unknwn.h>
+
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.Globalization.h>
