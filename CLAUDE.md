@@ -200,9 +200,9 @@ are verified only by CI.
 ### Windows (x86-64) — core + PDF proven
 
 - **Do** use `platform_windows.c` (Win32; UTF-8↔UTF-16 at the boundary)
-  + `platform_ocr_none.c`. Build with **Clang (MSVC ABI)**, not MSVC:
-  the kernel registry uses C11 atomics that MSVC supports only
-  experimentally.
+  + `platform_ocr_windows.cpp` (system OCR, see "OCR" below). Build with
+  **Clang (MSVC ABI)**, not MSVC: the kernel registry uses C11 atomics that
+  MSVC supports only experimentally.
 - **Do** guard GCC/Clang-only CMake flags with `if(NOT MSVC)` and link
   the Win32 libraries (bcrypt, shell32, ole32, ws2_32); `libm` is part of
   the CRT, not a separate library.
@@ -216,29 +216,38 @@ are verified only by CI.
   `win_tools.bat` bootstrap, local VS via `GYP_MSVS_*`, SDK 22621 install +
   gap-fill from 26100, `NTDDI_WIN11_BR`→`NTDDI_WIN10_NI`, `args.gn`); all
   are documented in `build_pdfium.sh`.
-- **Don't** build the native GUI on Windows yet (WebView2, not done).
-- **Don't** enable Tesseract OCR on Windows yet: the Windows CI configures
-  with `-DLISA_ENABLE_TESSERACT=OFF`, so it uses `platform_ocr_none.c`
-  (scans report "no text"). Tesseract fails to compile under the runner's
-  clang 20 + MSVC 14.51 STL — `<string_view>` pulls `<x86intrin.h>`, which
-  hits a clang-20 bug in `mmintrin.h` (target-attribute SSE2 vector types
-  treated as scalar). No compile flag fixes it; it needs a different LLVM.
-  Re-enable once the toolchain is updated. Tests that use POSIX (`fork`,
-  `unistd.h`) or include `llama.h` directly are guarded off Windows; keep
-  them that way until ported.
+- **Do** OCR on Windows via `Windows.Media.Ocr` (C++/WinRT) in
+  `platform_ocr_windows.cpp`, linked with `windowsapp`. It is a system
+  recogniser (no bundled model), like macOS Vision. The one `.cpp` builds
+  with `-std=c++20 -fexceptions -frtti` (set per-source); `platform.h` is
+  included inside `extern "C"`. See "OCR" below.
+- **Don't** build Tesseract on Windows: its heavy `<string_view>` use trips
+  a clang-20 `<mmintrin.h>` bug under the runner's MSVC 14.51 STL
+  (`<string_view>` → `<x86intrin.h>` → SSE2 vector types seen as scalar; no
+  compile flag fixes it). The CMake Tesseract block is guarded
+  `NOT APPLE AND NOT WIN32`, so Windows never touches it.
+- **Don't** build the native GUI on Windows yet (WebView2, not done). Tests
+  that use POSIX (`fork`, `unistd.h`) or include `llama.h` directly are
+  guarded off Windows; keep them that way until ported.
 
-### OCR (Tesseract + Leptonica)
+### OCR (per-OS system recogniser, Tesseract only where there is none)
 
-- **Do** build OCR in-tree on non-Apple via `LISA_ENABLE_TESSERACT`
-  (default ON): `add_subdirectory(third_party/{leptonica,tesseract})`.
-  Leptonica with every image codec off (we feed raw BGRx), Tesseract as the
-  full engine (disabling the legacy engine / ScrollView leaves undefined
-  references). `eng.traineddata` is embedded (`cmake/embed_tessdata.cmake`)
-  and extracted once to the data dir, so the binary stays self-contained.
-- **Do** keep macOS on Apple Vision (`platform_macos.m`); the OCR seam
-  (`lisa_ocr_available` / `lisa_ocr_image`, BGRx in, text out) is identical.
-- **Don't** let Tesseract pull image codecs or ICU; the model is English,
-  LSTM-selected at runtime (`OEM_LSTM_ONLY`).
+- **Do** use the OS recogniser where it exists: macOS → Apple Vision
+  (`platform_macos.m`), Windows → `Windows.Media.Ocr`
+  (`platform_ocr_windows.cpp`). Both need no bundled model. The OCR seam is
+  identical everywhere: `lisa_ocr_available` / `lisa_ocr_image`, 32-bit BGRx
+  rows in, one line of UTF-8 per recognised line out.
+- **Do** build Tesseract in-tree on **Linux only** (no system OCR there) via
+  `LISA_ENABLE_TESSERACT` (default ON, guarded `NOT APPLE AND NOT WIN32`):
+  `add_subdirectory(third_party/{leptonica,tesseract})`. Leptonica with every
+  image codec off (we feed raw BGRx), Tesseract as the full engine (disabling
+  the legacy engine / ScrollView leaves undefined references).
+  `eng.traineddata` is embedded (`cmake/embed_tessdata.cmake`) and extracted
+  once to the data dir, so the binary stays self-contained.
+- **Don't** assume Windows OCR is always present: it needs an OCR language
+  pack (default on consumer Win10/11 English; absent on some N/KN, Server and
+  LTSC SKUs). When the engine can't be created, the backend reports "no text"
+  and prints a one-time install hint — it never fails ingestion.
 
 ## Branch and CI discipline (how ports don't break `main`)
 
