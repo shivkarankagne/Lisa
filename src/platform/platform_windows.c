@@ -24,6 +24,7 @@
 #include <windows.h>
 #include <bcrypt.h>
 #include <shlobj.h>      /* SHGetKnownFolderPath */
+#include <shobjidl.h>    /* IFileOpenDialog (folder picker) */
 #include <shellapi.h>    /* ShellExecuteW */
 #include <io.h>          /* _get_osfhandle */
 
@@ -669,11 +670,44 @@ int lisa_open_url(const char* url) {
 
 /* ---- desktop (no native GUI on Windows yet) ------------------------- */
 
+/* Native "choose a folder" dialog via the Shell IFileOpenDialog, used by the
+ * `lisa gui` window. Returns a malloc'd UTF-8 path, or NULL if the user
+ * cancelled or the dialog could not be shown. Runs on the UI thread, where
+ * the webview has already put COM into a single-threaded apartment. */
 char* lisa_choose_folder(void) {
-    return NULL;
+    char* result = NULL;
+    HRESULT hrInit = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    int weInited = SUCCEEDED(hrInit) && hrInit != S_FALSE;
+
+    IFileOpenDialog* dlg = NULL;
+    HRESULT hr = CoCreateInstance(&CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER,
+                                  &IID_IFileOpenDialog, (void**)&dlg);
+    if (SUCCEEDED(hr) && dlg != NULL) {
+        DWORD opts = 0;
+        dlg->lpVtbl->GetOptions(dlg, &opts);
+        dlg->lpVtbl->SetOptions(dlg, opts | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
+        if (SUCCEEDED(dlg->lpVtbl->Show(dlg, NULL))) {
+            IShellItem* item = NULL;
+            if (SUCCEEDED(dlg->lpVtbl->GetResult(dlg, &item)) && item != NULL) {
+                PWSTR wpath = NULL;
+                if (SUCCEEDED(item->lpVtbl->GetDisplayName(item, SIGDN_FILESYSPATH, &wpath)) &&
+                    wpath != NULL) {
+                    result = to_utf8(wpath);
+                    CoTaskMemFree(wpath);
+                }
+                item->lpVtbl->Release(item);
+            }
+        }
+        dlg->lpVtbl->Release(dlg);
+    }
+
+    if (weInited) CoUninitialize();
+    return result;
 }
 
 int lisa_file_drops_install(void* native_view, lisa_drop_fn fn, void* user) {
+    /* Drag-and-drop onto the native window is not wired up on Windows yet;
+     * the GUI's folder picker (above) is the supported way to add a folder. */
     (void)native_view;
     (void)fn;
     (void)user;
