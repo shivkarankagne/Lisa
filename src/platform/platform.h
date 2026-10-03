@@ -206,6 +206,16 @@ int64_t lisa_process_id(void);
  */
 int lisa_process_alive(int64_t pid);
 
+/*
+ * Run a command and wait for it to finish, inheriting this process's
+ * stdin/stdout/stderr (so a child like `curl` can show its own progress).
+ * argv is NULL-terminated; argv[0] is looked up on PATH. On success returns
+ * LISA_PLAT_OK and sets *exit_code to the child's exit status; returns a
+ * LISA_PLAT_* error if the child could not be started. Used for first-run
+ * model download (shelling out to curl).
+ */
+int lisa_run_command(const char* const* argv, int* exit_code);
+
 /* Fill buf with n cryptographically secure random bytes. */
 int lisa_random_bytes(void* buf, size_t n);
 

@@ -9,6 +9,7 @@
 
 #include "yyjson.h"
 #include "../platform/platform.h"
+#include "../models/models.h"
 
 static const char* const k_kind_key[2] = { "chat", "embedding" };
 
@@ -266,6 +267,81 @@ int app_set_model(app_t* app, app_model_kind kind, const char* path) {
     return LISA_OK;
 }
 
+/* The default downloadable profile for a kind: the first known model of that
+ * kind that carries a download URL (same "first match wins" order the finder
+ * uses). NULL if none. */
+static const lm_profile_t* default_downloadable(app_model_kind kind) {
+    int want_embed = kind == APP_MODEL_EMBEDDING;
+    for (const lm_profile_t* p = lm_known_models(); p->id != NULL; p++) {
+        if ((p->is_embedding != 0) == (want_embed != 0) && p->download_url != NULL) return p;
+    }
+    return NULL;
+}
+
+int app_download_model(app_t* app, app_model_kind kind, const char** err) {
+    const char* dummy;
+    if (err == NULL) err = &dummy;
+    *err = NULL;
+
+    const lm_profile_t* prof = default_downloadable(kind);
+    if (prof == NULL) { *err = "no downloadable model is known for this kind"; return LISA_E_NOT_FOUND; }
+
+    char* dir = lisa_path_join(app->data_dir, "models");
+    if (dir == NULL) return LISA_E_NO_MEMORY;
+    if (lisa_mkdirs(dir) != LISA_PLAT_OK) { free(dir); *err = "cannot create the models directory"; return LISA_E_IO; }
+    char* dest = lisa_path_join(dir, prof->file_name);
+    free(dir);
+    if (dest == NULL) return LISA_E_NO_MEMORY;
+
+    /* Already downloaded and intact? Nothing to do. */
+    const lm_profile_t* have = NULL;
+    if (lisa_path_exists(dest) && lm_verify_file(dest, &have, NULL) == LM_OK && have == prof) {
+        free(dest);
+        return LISA_OK;
+    }
+
+    size_t tn = strlen(dest) + 6;
+    char* tmp = (char*)malloc(tn);
+    if (tmp == NULL) { free(dest); return LISA_E_NO_MEMORY; }
+    snprintf(tmp, tn, "%s.part", dest);
+
+    printf("Downloading %s (~%lld MB) from Hugging Face...\n",
+           prof->file_name, (long long)(prof->file_size / (1024 * 1024)));
+    fflush(stdout);
+
+    const char* argv[] = { "curl", "-fL", "--retry", "5", "--output", tmp, prof->download_url, NULL };
+    int code = -1;
+    int rc = lisa_run_command(argv, &code);
+    if (rc != LISA_PLAT_OK) {
+        *err = "could not run curl to download the model (install curl, or fetch the model manually — see docs/models.md)";
+        lisa_remove_file(tmp);
+        free(tmp); free(dest);
+        return LISA_E_IO;
+    }
+    if (code != 0) {
+        *err = "the model download failed (curl reported an error)";
+        lisa_remove_file(tmp);
+        free(tmp); free(dest);
+        return LISA_E_IO;
+    }
+
+    have = NULL;
+    if (lm_verify_file(tmp, &have, NULL) != LM_OK || have != prof) {
+        *err = "the downloaded model failed its checksum; it was not kept";
+        lisa_remove_file(tmp);
+        free(tmp); free(dest);
+        return LISA_E_IO;
+    }
+    if (lisa_rename_replace(tmp, dest) != LISA_PLAT_OK) {
+        *err = "cannot move the downloaded model into place";
+        lisa_remove_file(tmp);
+        free(tmp); free(dest);
+        return LISA_E_IO;
+    }
+    free(tmp); free(dest);
+    return LISA_OK;
+}
+
 int app_set_watch(app_t* app, const char* collection, const char* const* folders, int count) {
     if (count < 0 || count > APP_MAX_WATCHED) return LISA_E_INVALID_ARGUMENT;
     if (count > 0 && (collection == NULL || !app_valid_name(collection))) return LISA_E_INVALID_ARGUMENT;
@@ -368,8 +444,8 @@ int app_load_model(const app_t* app, app_model_kind kind, lisa_model_t** out, co
     char* path = app_find_model(app, kind, NULL);
     if (path == NULL) {
         *err = kind == APP_MODEL_CHAT
-                   ? "no chat model found; run `lisa model --set <file.gguf>` (see docs/models.md)"
-                   : "no embedding model found; run `lisa model --set <file.gguf>` (see docs/models.md)";
+                   ? "no chat model found; run `lisa model --download` (see docs/models.md)"
+                   : "no embedding model found; run `lisa model --download` (see docs/models.md)";
         return LISA_E_NOT_FOUND;
     }
     int rc = lisa_model_load(app->ctx, path, NULL, out);

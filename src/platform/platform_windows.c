@@ -626,6 +626,82 @@ int lisa_process_alive(int64_t pid) {
     return alive;
 }
 
+/* Append one argument to a command-line buffer with the quoting rules the C
+ * runtime's argv parser expects (see "Parsing C++ Command-Line Arguments"). */
+static int append_arg(char** buf, size_t* len, size_t* cap, const char* arg) {
+    int needs_quote = (arg[0] == '\0');
+    for (const char* p = arg; *p; p++) {
+        if (*p == ' ' || *p == '\t' || *p == '"') { needs_quote = 1; break; }
+    }
+    size_t extra = strlen(arg) * 2 + 4;   /* worst case: every char escaped */
+    if (*len + extra >= *cap) {
+        size_t nc = (*cap ? *cap : 64);
+        while (*len + extra >= nc) nc *= 2;
+        char* nb = (char*)realloc(*buf, nc);
+        if (nb == NULL) return LISA_PLAT_ENOMEM;
+        *buf = nb; *cap = nc;
+    }
+    char* out = *buf + *len;
+    if (*len) *out++ = ' ';
+    if (!needs_quote) {
+        for (const char* p = arg; *p; p++) *out++ = *p;
+    } else {
+        *out++ = '"';
+        for (const char* p = arg;; p++) {
+            size_t slashes = 0;
+            while (*p == '\\') { slashes++; p++; }
+            if (*p == '\0') {
+                for (size_t i = 0; i < slashes * 2; i++) *out++ = '\\';
+                break;
+            } else if (*p == '"') {
+                for (size_t i = 0; i < slashes * 2 + 1; i++) *out++ = '\\';
+                *out++ = '"';
+            } else {
+                for (size_t i = 0; i < slashes; i++) *out++ = '\\';
+                *out++ = *p;
+            }
+        }
+        *out++ = '"';
+    }
+    *out = '\0';
+    *len = (size_t)(out - *buf);
+    return LISA_PLAT_OK;
+}
+
+int lisa_run_command(const char* const* argv, int* exit_code) {
+    if (exit_code) *exit_code = -1;
+    if (argv == NULL || argv[0] == NULL) return LISA_PLAT_EINVAL;
+
+    char* cmd = NULL;
+    size_t len = 0, cap = 0;
+    for (int i = 0; argv[i] != NULL; i++) {
+        if (append_arg(&cmd, &len, &cap, argv[i]) != LISA_PLAT_OK) { free(cmd); return LISA_PLAT_ENOMEM; }
+    }
+    wchar_t* wcmd = to_wide(cmd ? cmd : "");
+    free(cmd);
+    if (wcmd == NULL) return LISA_PLAT_ENOMEM;
+
+    STARTUPINFOW si;
+    memset(&si, 0, sizeof(si));
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi;
+    memset(&pi, 0, sizeof(pi));
+
+    /* bInheritHandles TRUE, no USESTDHANDLES: a console child (curl) shares
+     * our console and shows its own progress. NULL app name => search PATH. */
+    BOOL ok = CreateProcessW(NULL, wcmd, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi);
+    free(wcmd);
+    if (!ok) return LISA_PLAT_EIO;
+
+    WaitForSingleObject(pi.hProcess, INFINITE);
+    DWORD code = 0;
+    GetExitCodeProcess(pi.hProcess, &code);
+    if (exit_code) *exit_code = (int)code;
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    return LISA_PLAT_OK;
+}
+
 int lisa_random_bytes(void* buf, size_t n) {
     if (buf == NULL && n > 0) return LISA_PLAT_EINVAL;
     if (n == 0) return LISA_PLAT_OK;

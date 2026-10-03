@@ -53,6 +53,7 @@ static const lm_profile_t k_profiles[] = {
          * emits for enable_thinking=False. Sampling per the model card. */
         "<think>\n\n</think>\n\n", 0.7f, 0.8f, 20, 1.5f,
         NULL, NULL, 0, 0,
+        "https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/bc640142c66e1fdd12af0bd68f40445458f3869b/Qwen3-4B-Q4_K_M.gguf",
     },
     {
         "e5-small-v2-q8_0", "e5-small-v2-q8_0.gguf", 36685088LL,
@@ -64,6 +65,7 @@ static const lm_profile_t k_profiles[] = {
         /* E5 was trained with these exact prefixes; without them the
          * vectors are noticeably worse. Mean pooling, so no EOS. */
         "query: ", "passage: ", 0, 0,
+        "https://huggingface.co/ggml-org/e5-small-v2-Q8_0-GGUF/resolve/main/e5-small-v2-q8_0.gguf",
     },
     {
         "qwen3-embedding-0.6b-q8_0", "Qwen3-Embedding-0.6B-Q8_0.gguf", 639150592LL,
@@ -75,15 +77,16 @@ static const lm_profile_t k_profiles[] = {
         /* Query instruction per the model card; documents are embedded as-is. */
         "Instruct: Given a question, retrieve passages that answer the question\nQuery:",
         "", 1, 1,
+        "https://huggingface.co/Qwen/Qwen3-Embedding-0.6B-GGUF/resolve/370f27d7550e0def9b39c1f16d3fbaa13aa67728/Qwen3-Embedding-0.6B-Q8_0.gguf",
     },
-    { NULL, NULL, 0, NULL, NULL, NULL, 0, NULL, 0, 0, 0, 0, NULL, NULL, 0, 0 },
+    { NULL, NULL, 0, NULL, NULL, NULL, 0, NULL, 0, 0, 0, 0, NULL, NULL, 0, 0, NULL },
 };
 
 static const lm_profile_t k_generic_gen = {
-    "generic", NULL, 0, NULL, NULL, NULL, 0, "", 0.7f, 0.9f, 40, 0.0f, NULL, NULL, 0, 0,
+    "generic", NULL, 0, NULL, NULL, NULL, 0, "", 0.7f, 0.9f, 40, 0.0f, NULL, NULL, 0, 0, NULL,
 };
 static const lm_profile_t k_generic_embed = {
-    "generic", NULL, 0, NULL, NULL, NULL, 1, NULL, 0, 0, 0, 0, "", "", 0, 0,
+    "generic", NULL, 0, NULL, NULL, NULL, 1, NULL, 0, 0, 0, 0, "", "", 0, 0, NULL,
 };
 
 const lm_profile_t* lm_known_models(void) {

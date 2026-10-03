@@ -76,6 +76,15 @@ char* app_find_model(const app_t* app, app_model_kind kind, const char** source)
 int app_set_model(app_t* app, app_model_kind kind, const char* path);
 
 /*
+ * Download the default model for `kind` into <data_dir>/models (shelling out
+ * to curl), verifying its SHA-256 before keeping it. A no-op that returns
+ * LISA_OK if the model is already present and intact. On failure sets *err to
+ * a human message (e.g. curl missing, checksum mismatch). Used for first-run
+ * model setup.
+ */
+int app_download_model(app_t* app, app_model_kind kind, const char** err);
+
+/*
  * Replace the watched folders (absolute paths that exist) and the
  * collection they are indexed into, and save config.json. count 0 stops
  * watching.
