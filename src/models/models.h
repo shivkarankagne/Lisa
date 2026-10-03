@@ -64,6 +64,10 @@ typedef struct {
     const char* document_prefix;
     int         supports_truncation;  /* Matryoshka: leading dims usable alone */
     int         append_eos;           /* end input with EOS (last-token pooling) */
+
+    /* Direct download URL for the weights (a pinned Hugging Face "resolve"
+     * link), used by first-run model download. NULL for generic profiles. */
+    const char* download_url;
 } lm_profile_t;
 
 /* All known models (terminated by an entry with id == NULL). */

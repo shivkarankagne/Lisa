@@ -510,6 +510,24 @@ int lisa_process_alive(int64_t pid) {
     return errno == EPERM;   /* exists but owned by another user */
 }
 
+extern char** environ;
+
+int lisa_run_command(const char* const* argv, int* exit_code) {
+    if (exit_code) *exit_code = -1;
+    if (argv == NULL || argv[0] == NULL) return LISA_PLAT_EINVAL;
+    pid_t pid;
+    /* No file actions: the child inherits our stdin/stdout/stderr, so curl
+     * draws its progress on the terminal. posix_spawnp searches PATH. */
+    int rc = posix_spawnp(&pid, argv[0], NULL, NULL, (char* const*)argv, environ);
+    if (rc != 0) return LISA_PLAT_EIO;
+    int status = 0;
+    while (waitpid(pid, &status, 0) < 0) {
+        if (errno != EINTR) return LISA_PLAT_EIO;
+    }
+    if (exit_code) *exit_code = WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+    return LISA_PLAT_OK;
+}
+
 int lisa_random_bytes(void* buf, size_t n) {
     if (buf == NULL && n > 0) return LISA_PLAT_EINVAL;
     unsigned char* p = (unsigned char*)buf;

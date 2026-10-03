@@ -2,9 +2,14 @@
 
 Model weights are licensed separately from code (plan §5). These are the
 models LISA 1.0 is built and tested with. They are **not** in the
-repository or the binary; users download them (W11 documents how), and
-`lisa_model_verify()` checks a file against this table (also compiled into
-`src/models/models.c`).
+repository or the binary; `lisa_model_verify()` checks a file against this
+table (also compiled into `src/models/models.c`).
+
+**Getting the models:** run `lisa model --download`. It fetches the default
+chat and embedding models below into `<data-dir>/models/` (shelling out to
+`curl`), verifies each file's SHA-256, and only then keeps it. `curl` ships
+with Windows 10+, macOS and most Linux; if it is missing, download the files
+listed here by hand into that folder. `lisa model` shows what is installed.
 
 Decision: 2026-09-18 — Qwen family (Apache-2.0) for generation, multilingual
 embeddings (plan §10, open question 1).

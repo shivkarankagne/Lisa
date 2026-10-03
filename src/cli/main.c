@@ -35,7 +35,7 @@ static const char k_usage[] =
     "  lisa ask     [--data <dir>] --collection <name> [--topk N] \"<question>\"\n"
     "  lisa serve   [--data <dir>] [--port <port>]                  local HTTP API\n"
     "  lisa gui     [--data <dir>] [--port <port>] [--browser]      desktop window\n"
-    "  lisa model   [--data <dir>] [--set <file.gguf>]              show or set models\n"
+    "  lisa model   [--data <dir>] [--set <file.gguf>] [--download] show, set or fetch models\n"
     "  lisa migrate --from <v1-dir> --to <dir> [--model <id>]       convert a LISA 0.1 collection\n"
     "  lisa --version\n"
     "\n"
@@ -80,6 +80,7 @@ typedef struct {
     int         port;
     int         json;
     int         browser;
+    int         download;
     const char* pos[256];
     int         n_pos;
 } args_t;
@@ -102,6 +103,7 @@ static int parse_args(int argc, char** argv, args_t* a) {
         const char** slot = NULL;
         if (strcmp(s, "--json") == 0) { a->json = 1; continue; }
         if (strcmp(s, "--browser") == 0) { a->browser = 1; continue; }
+        if (strcmp(s, "--download") == 0) { a->download = 1; continue; }
         if (strcmp(s, "--data") == 0) slot = &a->data;
         else if (strcmp(s, "--collection") == 0) slot = &a->collection;
         else if (strcmp(s, "--query") == 0) slot = &a->query;
@@ -516,6 +518,22 @@ static int cmd_gui(app_t* app, const args_t* a) {
 /* ---- model ----------------------------------------------------------------- */
 
 static int cmd_model(app_t* app, const args_t* a) {
+    if (a->download) {
+        int failed = 0;
+        static const char* const label[2] = { "chat", "embedding" };
+        for (int k = 0; k < 2; k++) {
+            const char* err = NULL;
+            printf("==> %s model\n", label[k]);
+            int rc = app_download_model(app, (app_model_kind)k, &err);
+            if (rc != LISA_OK) {
+                fprintf(stderr, "lisa: %s\n", err ? err : "download failed");
+                failed = 1;
+            } else {
+                printf("    ready\n");
+            }
+        }
+        return failed ? EXIT_ERROR : EXIT_OK;
+    }
     if (a->set) {
         lisa_known_model_t km;
         int vr = lisa_model_verify(a->set, &km, NULL);
@@ -580,7 +598,7 @@ static int cmd_model(app_t* app, const args_t* a) {
         free(path);
     }
     if (doc) print_json(doc);
-    else if (missing) printf("\nSet a model with: lisa model --set <file.gguf>  (see docs/models.md)\n");
+    else if (missing) printf("\nDownload the default models with: lisa model --download  (or set one: lisa model --set <file.gguf>; see docs/models.md)\n");
     return missing ? EXIT_NOT_FOUND : EXIT_OK;
 }
 
