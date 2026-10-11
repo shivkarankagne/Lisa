@@ -35,7 +35,8 @@ static const char k_usage[] =
     "  lisa ask     [--data <dir>] --collection <name> [--topk N] \"<question>\"\n"
     "  lisa serve   [--data <dir>] [--port <port>] [--token <t>]    local HTTP API\n"
     "  lisa gui     [--data <dir>] [--port <port>] [--browser]      desktop window\n"
-    "  lisa model   [--data <dir>] [--set <file.gguf>] [--download] show, set or fetch models\n"
+    "  lisa model   [--data <dir>] [--set <file.gguf>] [--download [chat|embedding]]\n"
+    "                                                               show, set or fetch models\n"
     "  lisa migrate --from <v1-dir> --to <dir> [--model <id>]       convert a LISA 0.1 collection\n"
     "  lisa --version\n"
     "\n"
@@ -530,7 +531,20 @@ static int cmd_model(app_t* app, const args_t* a) {
     if (a->download) {
         int failed = 0;
         static const char* const label[2] = { "chat", "embedding" };
+        /* `lisa model --download [chat|embedding]`: one kind, or both. An
+         * installer that answers with a remote AI only needs the embedding
+         * model and skips the large chat model. */
+        int only = -1;
+        if (a->n_pos > 0) {
+            for (int k = 0; k < 2; k++)
+                if (strcmp(a->pos[0], label[k]) == 0) only = k;
+            if (only < 0 || a->n_pos > 1) {
+                fprintf(stderr, "lisa: model --download takes chat or embedding (or nothing for both)\n");
+                return EXIT_USAGE;
+            }
+        }
         for (int k = 0; k < 2; k++) {
+            if (only >= 0 && k != only) continue;
             const char* err = NULL;
             printf("==> %s model\n", label[k]);
             int rc = app_download_model(app, (app_model_kind)k, &err);
