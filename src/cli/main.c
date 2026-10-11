@@ -33,7 +33,7 @@ static const char k_usage[] =
     "  lisa ingest  [--data <dir>] --collection <name> <path>...   index files and folders\n"
     "  lisa search  [--data <dir>] --collection <name> --query \"<text>\" [--topk N]\n"
     "  lisa ask     [--data <dir>] --collection <name> [--topk N] \"<question>\"\n"
-    "  lisa serve   [--data <dir>] [--port <port>]                  local HTTP API\n"
+    "  lisa serve   [--data <dir>] [--port <port>] [--token <t>]    local HTTP API\n"
     "  lisa gui     [--data <dir>] [--port <port>] [--browser]      desktop window\n"
     "  lisa model   [--data <dir>] [--set <file.gguf>] [--download] show, set or fetch models\n"
     "  lisa migrate --from <v1-dir> --to <dir> [--model <id>]       convert a LISA 0.1 collection\n"
@@ -44,6 +44,8 @@ static const char k_usage[] =
     "\n"
     "Add --json to ingest, search, ask, or model for machine-readable output, and\n"
     "--log-level error|warn|info|debug to any command (the log is <data>/lisa.log).\n"
+    "serve takes its session token from --token or LISA_TOKEN (16-64 chars), else\n"
+    "makes a new one each start.\n"
     "Default data directory: ~/Library/Application Support/LISA (macOS).\n";
 
 static int exit_for(int rc) {
@@ -136,6 +138,13 @@ static int parse_args(int argc, char** argv, args_t* a) {
             return EXIT_USAGE;
         }
         *slot = argv[++i];
+    }
+    /* The serve token can also come from the environment, so a service can
+     * set it without exposing it in the process list (ps shows argv, while
+     * /proc/<pid>/environ is readable only by the process's own user). */
+    if (a->token == NULL) {
+        const char* env = getenv("LISA_TOKEN");
+        if (env != NULL && env[0] != '\0') a->token = env;
     }
     return 0;
 }

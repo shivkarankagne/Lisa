@@ -81,6 +81,23 @@ wait "$SPID"
 SRC=$?
 [ "$SRC" -eq 0 ] && ok "serve stops cleanly on SIGINT" || bad "serve exit code $SRC"
 
+# serve: LISA_TOKEN sets the session token (keeps it out of the process list)
+LISA_TOKEN=env-test-token-0123456789 "$BIN" serve --data "$DATA" --port 0 > "$WORK/serve2.log" 2>&1 &
+SPID=$!
+for _ in $(seq 1 300); do grep -q "serving" "$WORK/serve2.log" && break; sleep 0.1; done
+PORT=$(grep -o '127.0.0.1:[0-9]*' "$WORK/serve2.log" | head -1 | cut -d: -f2)
+if [ -n "$PORT" ]; then
+    OUT=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer env-test-token-0123456789" "http://127.0.0.1:$PORT/v1/collections")
+    [ "$OUT" = "200" ] && ok "serve: LISA_TOKEN accepted" || bad "serve: LISA_TOKEN gave $OUT"
+    OUT=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer wrong-token-0123456789" "http://127.0.0.1:$PORT/v1/collections")
+    [ "$OUT" = "401" ] && ok "serve: wrong token refused" || bad "serve: wrong token gave $OUT"
+    grep -q "env-test-token-0123456789" "$WORK/serve2.log" && ok "serve: prints the env token it uses" || bad "serve: env token not reported"
+else
+    bad "serve with LISA_TOKEN did not start: $(cat "$WORK/serve2.log")"
+fi
+kill -INT "$SPID" 2>/dev/null
+wait "$SPID"
+
 # ---- with models -------------------------------------------------------------
 if [ -n "$MODELS" ] && [ -f "$MODELS/Qwen3-4B-Q4_K_M.gguf" ] && [ -f "$MODELS/Qwen3-Embedding-0.6B-Q8_0.gguf" ]; then
     rc "model --set chat" 0 "$BIN" model --data "$DATA" --set "$MODELS/Qwen3-4B-Q4_K_M.gguf"
