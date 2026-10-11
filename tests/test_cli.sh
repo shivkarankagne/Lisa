@@ -63,6 +63,10 @@ else
     bad "migrate: helper or index missing"
 fi
 
+# model --download accepts one kind; anything else is a usage error (no network needed)
+rc "model --download bogus kind" 1 "$BIN" model --data "$DATA" --download bogus
+rc "model --download two kinds" 1 "$BIN" model --data "$DATA" --download chat embedding
+
 # serve: starts, answers /v1/health, stops cleanly on Ctrl-C (SIGINT)
 "$BIN" serve --data "$DATA" --port 0 --token cli-test-token-0123456789 > "$WORK/serve.log" 2>&1 &
 SPID=$!
