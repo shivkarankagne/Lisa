@@ -92,6 +92,9 @@ static void test_registry(void) {
     TEST_ASSERT_EQUAL_STRING("markdown", doc_find_extractor("README.md")->name);
     TEST_ASSERT_NULL(doc_find_extractor("archive.zip"));
     TEST_ASSERT_EQUAL_STRING("docx", doc_find_extractor("Rent Agreement.DOCX")->name);
+    TEST_ASSERT_EQUAL_STRING("pptx", doc_find_extractor("Kickoff.PPTX")->name);
+    TEST_ASSERT_EQUAL_STRING("xlsx", doc_find_extractor("plan.xlsx")->name);
+    TEST_ASSERT_EQUAL_STRING("csv", doc_find_extractor("export.tsv")->name);
     TEST_ASSERT_NULL(doc_find_extractor("old.doc"));
     TEST_ASSERT_NULL(doc_find_extractor("noextension"));
     TEST_ASSERT_NULL(doc_find_extractor("dir.md/file"));
@@ -409,6 +412,88 @@ static void test_docx(void) {
     TEST_ASSERT_EQUAL_INT(DOC_ENOTFOUND, doc_extract(path, &t));
 }
 
+/* ---- PowerPoint, Excel, CSV -------------------------------------------- */
+
+static void dump(const char* what, const doc_text_t* t) {
+    if (getenv("DOC_DUMP")) printf("\n=== %s (%lld pages) ===\n%s\n=== end\n", what, (long long)t->n_pages, t->text);
+}
+
+static void test_pptx(void) {
+    char path[1200];
+    snprintf(path, sizeof(path), "%s/sample.pptx", g_fixtures);
+    doc_text_t t;
+    TEST_ASSERT_EQUAL_INT(DOC_OK, doc_extract(path, &t));
+    dump("pptx", &t);
+    TEST_ASSERT_EQUAL_STRING("Q3 Sales Kickoff", t.title);
+    /* One page per slide, in presentation order (slide2.xml is shown first). */
+    TEST_ASSERT_EQUAL_INT64(2, t.n_pages);
+    TEST_ASSERT_EQUAL_INT64(1, doc_page_at(&t, (int64_t)(strstr(t.text, "Agenda") - t.text)));
+    TEST_ASSERT_EQUAL_INT64(2, doc_page_at(&t, (int64_t)(strstr(t.text, "West region quota is 4.2M") - t.text)));
+    TEST_ASSERT_NOT_NULL(strstr(t.text, "Pricing & packaging for Q3"));
+    /* Speaker notes belong to their slide. */
+    const char* notes = strstr(t.text, "Notes: Remind reps: discounts above 15% need VP approval.");
+    TEST_ASSERT_NOT_NULL(notes);
+    TEST_ASSERT_EQUAL_INT64(1, doc_page_at(&t, (int64_t)(notes - t.text)));
+    TEST_ASSERT_NULL(strstr(t.text, "99"));   /* slide-number field */
+    /* Table rows keep a value next to what it is. */
+    TEST_ASSERT_NOT_NULL(strstr(t.text, "Item | Cost\nLaptops | $42,000"));
+    doc_chunk_params_t p = DOC_CHUNK_PARAMS_DEFAULT;
+    check_chunks(&t, &p);
+    doc_text_free(&t);
+
+    static const unsigned char ole[16] = { 0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1 };
+    TEST_ASSERT_EQUAL_INT(DOC_EENCRYPTED, doc_extract(write_file("pptx", (const char*)ole, sizeof(ole)), &t));
+    TEST_ASSERT_EQUAL_INT(DOC_EFORMAT, doc_extract(write_file("pptx", "PK nope", 7), &t));
+}
+
+static void test_xlsx(void) {
+    char path[1200];
+    snprintf(path, sizeof(path), "%s/sample.xlsx", g_fixtures);
+    doc_text_t t;
+    TEST_ASSERT_EQUAL_INT(DOC_OK, doc_extract(path, &t));
+    dump("xlsx", &t);
+    TEST_ASSERT_EQUAL_STRING("Regional Plan", t.title);
+    TEST_ASSERT_EQUAL_INT64(2, t.n_pages);   /* one page per sheet */
+    TEST_ASSERT_NOT_NULL(strstr(t.text, "Sheet: Revenue"));
+    /* Rows are labeled by the header; the gap column C stays out of the way. */
+    TEST_ASSERT_NOT_NULL(strstr(t.text, "Region: West | Revenue: 120000 | Active: TRUE"));
+    TEST_ASSERT_NOT_NULL(strstr(t.text, "Region: East Coast | Revenue: 98500.5 | Active: FALSE"));
+    TEST_ASSERT_NULL(strstr(t.text, "PHONETIC"));   /* phonetic guide */
+    const char* s2 = strstr(t.text, "Sheet: Owners & Notes");
+    TEST_ASSERT_NOT_NULL(s2);
+    TEST_ASSERT_EQUAL_INT64(2, doc_page_at(&t, (int64_t)(s2 - t.text)));
+    TEST_ASSERT_NOT_NULL(strstr(t.text, "Owner: Priya <finance>"));
+    doc_chunk_params_t p = DOC_CHUNK_PARAMS_DEFAULT;
+    check_chunks(&t, &p);
+    doc_text_free(&t);
+    TEST_ASSERT_EQUAL_INT(DOC_EFORMAT, doc_extract(write_file("xlsx", "PK nope", 7), &t));
+}
+
+static void test_csv(void) {
+    char path[1200];
+    snprintf(path, sizeof(path), "%s/sample.csv", g_fixtures);
+    doc_text_t t;
+    TEST_ASSERT_EQUAL_INT(DOC_OK, doc_extract(path, &t));
+    dump("csv", &t);
+    TEST_ASSERT_NOT_NULL(strstr(t.text, "Customer: Acme Corp | Plan: Pro | Notes: Renewal due Nov 1, 2026"));
+    TEST_ASSERT_NOT_NULL(strstr(t.text, "Customer: Globex, Inc. | Plan: Basic | Notes: Asked about \"SSO\" and audit logs"));
+    doc_text_free(&t);
+
+    /* Semicolons and tabs are detected; a file with no header row is unlabeled. */
+    const char* semi = write_file("csv", "Name;City\nAsha;Pune\n", 21);
+    TEST_ASSERT_EQUAL_INT(DOC_OK, doc_extract(semi, &t));
+    TEST_ASSERT_NOT_NULL(strstr(t.text, "Name: Asha | City: Pune"));
+    doc_text_free(&t);
+    const char* tsv = write_file("tsv", "id\tqty\n1\t5\n", 12);
+    TEST_ASSERT_EQUAL_INT(DOC_OK, doc_extract(tsv, &t));
+    TEST_ASSERT_NOT_NULL(strstr(t.text, "id: 1 | qty: 5"));
+    doc_text_free(&t);
+    const char* nums = write_file("csv", "1,2\n3,4\n", 8);
+    TEST_ASSERT_EQUAL_INT(DOC_OK, doc_extract(nums, &t));
+    TEST_ASSERT_NOT_NULL(strstr(t.text, "1 | 2"));
+    doc_text_free(&t);
+}
+
 /* ---- scanned PDF (OCR) ---------------------------------------------------- */
 
 static void test_scanned_pdf_ocr(void) {
@@ -482,6 +567,9 @@ int main(int argc, char** argv) {
     RUN_TEST(test_chunk_randomised);
     RUN_TEST(test_pdf);
     RUN_TEST(test_docx);
+    RUN_TEST(test_pptx);
+    RUN_TEST(test_xlsx);
+    RUN_TEST(test_csv);
     RUN_TEST(test_scanned_pdf_ocr);
     RUN_TEST(test_ocr_platform);
     return UNITY_END() == 0 ? 0 : 1;
