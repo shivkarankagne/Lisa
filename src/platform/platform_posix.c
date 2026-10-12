@@ -510,6 +510,12 @@ int lisa_process_alive(int64_t pid) {
     return errno == EPERM;   /* exists but owned by another user */
 }
 
+int lisa_cpu_count(void) {
+    long n = sysconf(_SC_NPROCESSORS_ONLN);
+    if (n < 1) return 1;
+    return n > 256 ? 256 : (int)n;
+}
+
 extern char** environ;
 
 int lisa_run_command(const char* const* argv, int* exit_code) {

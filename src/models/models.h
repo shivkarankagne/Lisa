@@ -85,6 +85,14 @@ int lm_verify_file(const char* path, const lm_profile_t** out, char* hex_out);
 /* ---- loading ---------------------------------------------------------- */
 
 int  lm_load(const char* path, const lm_load_params_t* params, lm_model_t** out);
+
+/*
+ * Threads used when the caller doesn't choose: LISA_THREADS if set to 1..256
+ * (for a container with a CPU quota), else every online CPU. llama.cpp's own
+ * default is a fixed 4, which oversubscribes a 2-core server (spinning
+ * threads fight for the cores) and leaves most of a 16-core one idle.
+ */
+int  lm_default_threads(void);
 void lm_free(lm_model_t* m);
 
 typedef struct {

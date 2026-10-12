@@ -1,0 +1,47 @@
+# Indexing speed on a small Linux server (2 vCPU GitHub runner): the same
+# 300 documents with llama.cpp's old fixed 4 threads vs LISA's default (every
+# online CPU). Manual, or on push to bench/**.
+name: bench-ingest
+on:
+  workflow_dispatch:
+  push:
+    branches: ["bench/**"]
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - name: Build
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ninja-build >/dev/null
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DLISA_REQUIRE_PDF=OFF >/dev/null
+          cmake --build build --target lisa -j"$(nproc)" >/dev/null
+          nproc; lscpu | grep -E "Model name|Flags" | cut -c1-200
+      - name: Model + corpus
+        run: |
+          ./build/lisa model --data d4 --download embedding
+          cp -r d4 dn
+          python3 - <<'PY'
+          import os, random
+          random.seed(1)
+          words = open("/usr/share/dict/words").read().split() if os.path.exists("/usr/share/dict/words") else [f"w{i}" for i in range(5000)]
+          os.makedirs("kb", exist_ok=True)
+          for i in range(300):
+              with open(f"kb/doc{i:04d}.txt", "w") as f:
+                  f.write(" ".join(random.choice(words) for _ in range(650)))
+          PY
+      - name: Ingest matrix (cores x threads)
+        run: |
+          rate() { python3 -c "import json,sys;s=json.load(sys.stdin);s=s.get('status',s);print(round(s['chunks_added']/s['elapsed_seconds'],2),'chunks/s')"; }
+          head -c 0 /dev/null
+          mkdir -p small && cp kb/doc00[0-9]*.txt small/   # 100 docs
+          run() { rm -rf "d_$1_$2" && cp -r d4 "d_$1_$2"
+                  echo -n "cores=$1 threads=$2: "
+                  LISA_THREADS=$2 taskset -c "$3" ./build/lisa ingest --data "d_$1_$2" --collection kb small --json | rate; }
+          run 2 4 0,1     # old behaviour on a 2-core server
+          run 2 2 0,1     # new default on a 2-core server
+          run 4 4 0-3
+          run 4 2 0-3
+          run 1 1 0
