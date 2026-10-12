@@ -32,7 +32,16 @@ jobs:
               with open(f"kb/doc{i:04d}.txt", "w") as f:
                   f.write(" ".join(random.choice(words) for _ in range(650)))
           PY
-      - name: Ingest with 4 threads (old llama.cpp default)
-        run: LISA_THREADS=4 ./build/lisa ingest --data d4 --collection kb kb --json | python3 -c "import json,sys;s=json.load(sys.stdin);s=s.get('status',s);print('4 threads:',s['chunks_added'],'chunks in',round(s['elapsed_seconds'],1),'s =',round(s['chunks_added']/s['elapsed_seconds'],2),'chunks/s')"
-      - name: Ingest with default (all online CPUs)
-        run: ./build/lisa ingest --data dn --collection kb kb --json | python3 -c "import json,sys;s=json.load(sys.stdin);s=s.get('status',s);print('default threads:',s['chunks_added'],'chunks in',round(s['elapsed_seconds'],1),'s =',round(s['chunks_added']/s['elapsed_seconds'],2),'chunks/s')"
+      - name: Ingest matrix (cores x threads)
+        run: |
+          rate() { python3 -c "import json,sys;s=json.load(sys.stdin);s=s.get('status',s);print(round(s['chunks_added']/s['elapsed_seconds'],2),'chunks/s')"; }
+          head -c 0 /dev/null
+          mkdir -p small && cp kb/doc00[0-9]*.txt small/   # 100 docs
+          run() { rm -rf "d_$1_$2" && cp -r d4 "d_$1_$2"
+                  echo -n "cores=$1 threads=$2: "
+                  LISA_THREADS=$2 taskset -c "$3" ./build/lisa ingest --data "d_$1_$2" --collection kb small --json | rate; }
+          run 2 4 0,1     # old behaviour on a 2-core server
+          run 2 2 0,1     # new default on a 2-core server
+          run 4 4 0-3
+          run 4 2 0-3
+          run 1 1 0
