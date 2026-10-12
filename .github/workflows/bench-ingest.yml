@@ -5,7 +5,7 @@ name: bench-ingest
 on:
   workflow_dispatch:
   push:
-    branches: ["bench/**", "fix/model-threads-default"]
+    branches: ["bench/**"]
 jobs:
   linux:
     runs-on: ubuntu-latest
