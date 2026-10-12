@@ -735,6 +735,12 @@ void lisa_sleep_ms(int64_t ms) {
     Sleep((DWORD)ms);
 }
 
+int lisa_cpu_count(void) {
+    DWORD n = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+    if (n < 1) return 1;
+    return n > 256 ? 256 : (int)n;
+}
+
 int lisa_open_url(const char* url) {
     if (url == NULL || strncmp(url, "http", 4) != 0) return LISA_PLAT_EINVAL;
     wchar_t* w = to_wide(url);

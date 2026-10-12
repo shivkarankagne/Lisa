@@ -230,6 +230,9 @@ int lisa_stop_requested(void);
 /* Sleep for ms milliseconds. */
 void lisa_sleep_ms(int64_t ms);
 
+/* Number of CPUs online for this process, 1..256. */
+int lisa_cpu_count(void);
+
 /* Open a URL in the user's default browser. */
 int lisa_open_url(const char* url);
 

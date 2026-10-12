@@ -1,0 +1,38 @@
+# Indexing speed on a small Linux server (2 vCPU GitHub runner): the same
+# 300 documents with llama.cpp's old fixed 4 threads vs LISA's default (every
+# online CPU). Manual, or on push to bench/**.
+name: bench-ingest
+on:
+  workflow_dispatch:
+  push:
+    branches: ["bench/**", "fix/model-threads-default"]
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive }
+      - name: Build
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ninja-build >/dev/null
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release >/dev/null
+          cmake --build build --target lisa -j"$(nproc)" >/dev/null
+          nproc; lscpu | grep -E "Model name|Flags" | cut -c1-200
+      - name: Model + corpus
+        run: |
+          ./build/lisa model --data d4 --download embedding
+          cp -r d4 dn
+          python3 - <<'PY'
+          import os, random
+          random.seed(1)
+          words = open("/usr/share/dict/words").read().split() if os.path.exists("/usr/share/dict/words") else [f"w{i}" for i in range(5000)]
+          os.makedirs("kb", exist_ok=True)
+          for i in range(300):
+              with open(f"kb/doc{i:04d}.txt", "w") as f:
+                  f.write(" ".join(random.choice(words) for _ in range(650)))
+          PY
+      - name: Ingest with 4 threads (old llama.cpp default)
+        run: LISA_THREADS=4 ./build/lisa ingest --data d4 --collection kb kb --json | python3 -c "import json,sys;s=json.load(sys.stdin);s=s.get('status',s);print('4 threads:',s['chunks_added'],'chunks in',round(s['elapsed_seconds'],1),'s =',round(s['chunks_added']/s['elapsed_seconds'],2),'chunks/s')"
+      - name: Ingest with default (all online CPUs)
+        run: ./build/lisa ingest --data dn --collection kb kb --json | python3 -c "import json,sys;s=json.load(sys.stdin);s=s.get('status',s);print('default threads:',s['chunks_added'],'chunks in',round(s['elapsed_seconds'],1),'s =',round(s['chunks_added']/s['elapsed_seconds'],2),'chunks/s')"

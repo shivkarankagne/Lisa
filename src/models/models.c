@@ -160,6 +160,16 @@ static const lm_profile_t* pick_profile(const char* arch, int is_embedding) {
     return is_embedding ? &k_generic_embed : &k_generic_gen;
 }
 
+int lm_default_threads(void) {
+    const char* env = getenv("LISA_THREADS");
+    if (env != NULL && *env != '\0') {
+        char* end = NULL;
+        long n = strtol(env, &end, 10);
+        if (end != env && *end == '\0' && n >= 1 && n <= 256) return (int)n;
+    }
+    return lisa_cpu_count();
+}
+
 int lm_load(const char* path, const lm_load_params_t* params, lm_model_t** out) {
     if (path == NULL || params == NULL || out == NULL) return LM_EINVAL;
     *out = NULL;
@@ -188,7 +198,7 @@ int lm_load(const char* path, const lm_load_params_t* params, lm_model_t** out) 
     m->vocab = llama_model_get_vocab(model);
     m->file_size = size;
     m->gpu_layers = params->gpu_layers;
-    m->threads = params->threads;
+    m->threads = params->threads > 0 ? params->threads : lm_default_threads();
     m->context_tokens = params->context_tokens ? params->context_tokens : DEFAULT_CONTEXT;
     if (m->context_tokens > llama_model_n_ctx_train(model))
         m->context_tokens = llama_model_n_ctx_train(model);

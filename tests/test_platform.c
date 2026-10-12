@@ -14,6 +14,7 @@
 #include <unistd.h>
 
 #include "../src/platform/platform.h"
+#include "../src/models/models.h"
 
 static int g_fail = 0;
 
@@ -114,6 +115,24 @@ int main(int argc, char** argv) {
         printf("FAIL: allocation\n");
         return 1;
     }
+
+    /* CPUs and model threads: unset threads means every online CPU (or
+     * LISA_THREADS), never llama.cpp's fixed 4, which oversubscribed a
+     * 2-core server and made indexing crawl (resource profile, 2026-10-12). */
+    int cpus = lisa_cpu_count();
+    check(cpus >= 1 && cpus <= 256, "cpu_count in 1..256");
+    unsetenv("LISA_THREADS");
+    check(lm_default_threads() == cpus, "default threads = online CPUs");
+    setenv("LISA_THREADS", "3", 1);
+    check(lm_default_threads() == 3, "LISA_THREADS overrides");
+    const char* bad[] = { "0", "-2", "abc", "4x", "999", "" };
+    int bad_ok = 1;
+    for (size_t i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+        setenv("LISA_THREADS", bad[i], 1);
+        bad_ok &= lm_default_threads() == cpus;
+    }
+    check(bad_ok, "invalid LISA_THREADS falls back to CPU count");
+    unsetenv("LISA_THREADS");
 
     /* paths */
     check(lisa_path_sep() == '/', "path separator");
