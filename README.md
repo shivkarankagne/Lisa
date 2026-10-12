@@ -42,7 +42,7 @@ and searches with an embedding model:
     lisa model --set ~/lisa-models/e5-small-v2-q8_0.gguf
     lisa model            # shows both files and verifies them (SHA-256)
 
-**3. Add documents** (`.txt`, `.md`, `.pdf`, `.docx`; scanned PDFs are
+**3. Add documents** (`.txt`, `.md`, `.pdf`, `.docx`, `.pptx`, `.xlsx`, `.csv`/`.tsv`; scanned PDFs are
 read with text recognition):
 
     lisa ingest --collection manuals ~/Documents/manuals

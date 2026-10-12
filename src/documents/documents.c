@@ -21,6 +21,9 @@ static const char* const k_md_ext[]   = { "md", "markdown", "mdown", "mkd", NULL
 static const char* const k_pdf_ext[]  = { "pdf", NULL };
 #endif
 static const char* const k_docx_ext[] = { "docx", NULL };
+static const char* const k_pptx_ext[] = { "pptx", NULL };
+static const char* const k_xlsx_ext[] = { "xlsx", NULL };
+static const char* const k_csv_ext[]  = { "csv", "tsv", NULL };
 
 static const doc_extractor_t k_extractors[] = {
     { "text",     k_text_ext, doc_extract_text },
@@ -29,6 +32,9 @@ static const doc_extractor_t k_extractors[] = {
     { "pdf",      k_pdf_ext,  doc_extract_pdf },
 #endif
     { "docx",     k_docx_ext, doc_extract_docx },
+    { "pptx",     k_pptx_ext, doc_extract_pptx },
+    { "xlsx",     k_xlsx_ext, doc_extract_xlsx },
+    { "csv",      k_csv_ext,  doc_extract_csv },
     { NULL, NULL, NULL },
 };
 

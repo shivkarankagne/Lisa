@@ -248,6 +248,10 @@ add_library(lisa_core STATIC
     src/documents/markdown.c
     src/documents/chunk.c
     src/documents/docx.c
+    src/documents/ooxml.c
+    src/documents/pptx.c
+    src/documents/xlsx.c
+    src/documents/csv.c
     src/ingest/ingest.c
     src/kernels/registry.c
     src/kernels/kernels_scalar.c
