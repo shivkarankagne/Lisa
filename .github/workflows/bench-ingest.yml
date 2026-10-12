@@ -16,7 +16,7 @@ jobs:
       - name: Build
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq ninja-build >/dev/null
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release >/dev/null
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DLISA_REQUIRE_PDF=OFF >/dev/null
           cmake --build build --target lisa -j"$(nproc)" >/dev/null
           nproc; lscpu | grep -E "Model name|Flags" | cut -c1-200
       - name: Model + corpus
